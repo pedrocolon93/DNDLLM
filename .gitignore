@@ -97,3 +97,10 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Unity Version Control (Plastic SCM) files
+.plastic/
+*.private
+*.private.meta
+*.private.[0-9]*
+*.private.[0-9]*.meta
