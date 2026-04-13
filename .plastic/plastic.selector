@@ -1,4 +1,4 @@
-repository "Cloud Repositories/DNDLLM@4672930795616@cloud"
+repository "DNDLLM/DNDLLM@1949488@cloud"
   path "/"
     br "/main"
     co "/main"
