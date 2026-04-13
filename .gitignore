@@ -3,6 +3,13 @@
 # Get latest from https://github.com/github/gitignore/blob/main/Unity.gitignore
 #
 .utmp/
+
+# Claude Code worktrees
+/.claude/worktrees/
+
+# Unity package binaries (large executables shipped with packages)
+**/RelayApp~/
+Packages/com.unity.ai.assistant/
 /[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
