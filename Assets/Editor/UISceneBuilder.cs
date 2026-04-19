@@ -5,6 +5,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using DnD.UI;
+using DnD.Managers;
 
 public static class UISceneBuilder
 {
@@ -218,6 +219,32 @@ public static class UISceneBuilder
 
         EditorSceneManager.MarkSceneDirty(scene);
         Debug.Log("[UISceneBuilder] Canvas rebuilt. Press Ctrl+S to save the scene.");
+    }
+
+    [MenuItem("DnD/Setup Game Manager")]
+    public static void SetupGameManager()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        // Attach GameManager to the existing "GameSystem" object, or create one
+        var gameSystemGO = GameObject.Find("GameSystem");
+        if (gameSystemGO == null)
+        {
+            gameSystemGO = new GameObject("GameSystem");
+            Undo.RegisterCreatedObjectUndo(gameSystemGO, "Create GameSystem");
+        }
+
+        if (gameSystemGO.GetComponent<GameManager>() == null)
+        {
+            Undo.AddComponent<GameManager>(gameSystemGO);
+            Debug.Log("[UISceneBuilder] DnD.Managers.GameManager added to GameSystem. Press Ctrl+S to save.");
+        }
+        else
+        {
+            Debug.Log("[UISceneBuilder] GameManager already present on GameSystem.");
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
