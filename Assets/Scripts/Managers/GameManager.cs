@@ -7,6 +7,7 @@ using DnD.Character;
 using DnD.AI;
 using DnD.UI;
 using DnD.Combat;
+using DNDLLM.Map;
 
 namespace DnD.Managers
 {
@@ -141,34 +142,27 @@ namespace DnD.Managers
 
         private void ShowMainMenu()
         {
-            if (ChatUI.Instance != null)
-            {
-                ChatUI.Instance.AddSystemMessage("=== WELCOME TO D&D LLM ===");
-                ChatUI.Instance.AddSystemMessage("A D&D 5e adventure powered by AI!");
-                ChatUI.Instance.AddSystemMessage("");
-                ChatUI.Instance.AddSystemMessage("Type 'start' to begin character creation");
-                ChatUI.Instance.AddSystemMessage("Or describe the campaign you'd like to play!");
-            }
+            if (ChatUI.Instance == null) return;
+            ChatUI.Instance.AddSystemMessage("✦  WELCOME TO D&D LLM  ✦");
+            ChatUI.Instance.AddSystemMessage("An adventure powered by AI.");
+            ChatUI.Instance.AddSystemMessage("Type 'start' to begin — or describe the world you want to explore.");
         }
 
         private void StartCharacterCreation()
         {
-            if (ChatUI.Instance != null)
-            {
-                ChatUI.Instance.AddSystemMessage("=== CHARACTER CREATION ===");
-                ChatUI.Instance.AddSystemMessage("Tell me about your character!");
-                ChatUI.Instance.AddSystemMessage("What kind of hero are you? (fighter, wizard, rogue, cleric)");
-                ChatUI.Instance.AddSystemMessage("Describe your character's background and personality.");
-            }
+            if (ChatUI.Instance == null) return;
+            ChatUI.Instance.AddSystemMessage("✦  CHARACTER CREATION  ✦");
+            ChatUI.Instance.AddSystemMessage("Describe your hero — class, background, personality.");
         }
 
         private void StartExploration()
         {
-            if (ChatUI.Instance != null)
-            {
-                ChatUI.Instance.AddSystemMessage("=== ADVENTURE BEGINS ===");
-                ChatUI.Instance.AddSystemMessage("Your journey starts...");
-            }
+            // Generate the map
+            if (MapGenerator.Instance != null)
+                MapGenerator.Instance.GenerateMap("dungeon");
+
+            if (ChatUI.Instance == null) return;
+            ChatUI.Instance.AddSystemMessage("✦  YOUR ADVENTURE BEGINS  ✦");
         }
 
         private async void HandlePlayerInput(string input)
