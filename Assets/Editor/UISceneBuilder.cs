@@ -431,7 +431,9 @@ public static class UISceneBuilder
 
         // ── Wire TitleScreen fields ──────────────────────────────────────
         var so = new SerializedObject(titleScreen);
-        so.FindProperty("newGameButton").objectReferenceValue = ngBtn;
+        var ngBtnProp = so.FindProperty("newGameButton");
+        if (ngBtnProp != null) ngBtnProp.objectReferenceValue = ngBtn;
+        else Debug.LogError("[UISceneBuilder] 'newGameButton' property not found on TitleScreen.");
         SetArrayProp(so, "slotButtons",       slotButtons);
         SetArrayProp(so, "slotPortraits",     slotPortraits);
         SetArrayProp(so, "slotNameTexts",     slotNameTexts);
@@ -453,6 +455,7 @@ public static class UISceneBuilder
             }
         }
 
+        Canvas.ForceUpdateCanvases();
         EditorSceneManager.MarkSceneDirty(scene);
         Debug.Log("[UISceneBuilder] Title screen built. Press Ctrl+S to save.");
     }
@@ -488,6 +491,7 @@ public static class UISceneBuilder
         where T : UnityEngine.Object
     {
         var prop = so.FindProperty(propName);
+        if (prop == null) { Debug.LogError($"[UISceneBuilder] SerializedProperty '{propName}' not found — check field name."); return; }
         prop.arraySize = values.Length;
         for (int i = 0; i < values.Length; i++)
             prop.GetArrayElementAtIndex(i).objectReferenceValue = values[i];
