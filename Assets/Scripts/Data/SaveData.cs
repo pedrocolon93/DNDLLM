@@ -35,7 +35,7 @@ namespace DnD.Data
         public string gameState;   // GameState.ToString()
 
         // Full conversation history
-        public List<ChatMessageData> messages;
+        public List<ChatMessageData> messages = new List<ChatMessageData>();
     }
 
     [Serializable]
@@ -53,6 +53,7 @@ namespace DnD.Data
         public CharacterClassName characterClass;
         public string             appearanceDescription;
         public string             backstory;
+        // Not serialized via JsonUtility — SaveSystem writes/reads this as slot_N_portrait.png
         public Texture2D          portrait;  // null if generation timed out
     }
 }
