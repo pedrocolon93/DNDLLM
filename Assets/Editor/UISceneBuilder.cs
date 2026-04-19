@@ -229,7 +229,7 @@ public static class UISceneBuilder
 
     private static GameObject MakeGO(string name, Transform parent)
     {
-        var go = new GameObject(name);
+        var go = new GameObject(name, typeof(RectTransform));
         go.transform.SetParent(parent, false);
         return go;
     }
