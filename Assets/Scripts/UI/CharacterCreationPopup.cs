@@ -77,6 +77,11 @@ namespace DnD.UI
 
         private void Start()
         {
+            if (nextButton == null || backButton == null || cancelButton == null || beginButton == null)
+            {
+                Debug.LogError("[CharacterCreationPopup] One or more navigation buttons are not assigned in the Inspector.", this);
+                return;
+            }
             nextButton.onClick.AddListener(OnNext);
             backButton.onClick.AddListener(OnBack);
             cancelButton.onClick.AddListener(OnCancel);
@@ -113,15 +118,16 @@ namespace DnD.UI
 
             // Fill bars: all bars before current step are active
             for (int i = 0; i < stepBars.Length; i++)
-                stepBars[i].color = (i < Mathf.Max(step, 1)) ? (Color)BarActive : (Color)BarInactive;
+                if (stepBars[i] != null)
+                    stepBars[i].color = (i < Mathf.Max(step, 1)) ? (Color)BarActive : (Color)BarInactive;
 
             if (stepLabel != null)
                 stepLabel.text = StepLabels[Mathf.Min(step, StepLabels.Length - 1)];
 
             bool isConfirm = step == 5;
-            backButton.gameObject.SetActive(step > 0 && !isConfirm);
-            cancelButton.gameObject.SetActive(!isConfirm);
-            nextButton.gameObject.SetActive(!isConfirm);
+            if (backButton != null)   backButton.gameObject.SetActive(step > 0 && !isConfirm);
+            if (cancelButton != null) cancelButton.gameObject.SetActive(!isConfirm);
+            if (nextButton != null)   nextButton.gameObject.SetActive(!isConfirm);
 
             if (isConfirm) _ = GeneratePortraitAsync();
         }
@@ -238,10 +244,18 @@ namespace DnD.UI
             var timeoutTask  = Task.Delay(30000);
             var completed    = await Task.WhenAny(generateTask, timeoutTask);
 
-            if (completed == generateTask && generateTask.Result != null)
+            if (completed == generateTask)
             {
-                _portrait = generateTask.Result;
-                if (portraitImage != null) portraitImage.texture = _portrait;
+                try
+                {
+                    _portrait = await generateTask;
+                    if (_portrait != null && portraitImage != null)
+                        portraitImage.texture = _portrait;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[CharacterCreationPopup] Portrait generation failed: {e.Message}");
+                }
             }
 
             if (statsText != null)
