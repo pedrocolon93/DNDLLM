@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Threading.Tasks;
+using DNDLLM.Core;
 using DNDLLM.Services;
 using DNDLLM.Character;
 using DNDLLM.Utils;

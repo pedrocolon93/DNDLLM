@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections;
 using System.Threading.Tasks;
+using DNDLLM.Core;
 using DNDLLM.Services;
 
 namespace DNDLLM.Story
