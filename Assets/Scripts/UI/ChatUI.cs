@@ -107,7 +107,9 @@ namespace DnD.UI
                 string type = name.Contains("Player") ? "Player"
                             : name.Contains("DM")     ? "DM"
                             : "System";
-                result.Add(new ChatMessageData { type = type, text = tmp.text });
+                if (type == "System" && !name.Contains("System"))
+                    Debug.LogWarning($"[ChatUI] GetMessageHistory: unrecognised message GO name '{name}', defaulting to System");
+                result.Add(new ChatMessageData { type = type, text = tmp.GetParsedText() });
             }
             return result;
         }
