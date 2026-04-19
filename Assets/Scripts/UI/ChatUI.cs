@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using DnD.Data;
 
 namespace DnD.UI
 {
@@ -29,9 +30,20 @@ namespace DnD.UI
 
         private void Awake()
         {
-            Debug.Log($"[ChatUI] Awake on '{gameObject.name}', contentPanel={contentPanel}, scrollRect={scrollRect}");
             if (Instance == null) Instance = this;
             else Destroy(gameObject);
+        }
+
+        private void OnGUI()
+        {
+            GUI.color = Color.cyan;
+            string info = $"[ChatUI] msgs={activeMessages.Count}";
+            if (contentPanel != null)
+                info += $" panelH={contentPanel.rect.height:F0} panelW={contentPanel.rect.width:F0}";
+            else
+                info += " contentPanel=NULL";
+            GUI.Label(new Rect(10, 50, 700, 30), info);
+            GUI.color = Color.white;
         }
 
         private void Start()
@@ -82,6 +94,24 @@ namespace DnD.UI
             activeMessages.Clear();
         }
 
+        /// <summary>Returns a snapshot of all visible messages for saving.</summary>
+        public List<ChatMessageData> GetMessageHistory()
+        {
+            var result = new List<ChatMessageData>();
+            foreach (var go in activeMessages)
+            {
+                if (go == null) continue;
+                var tmp = go.GetComponentInChildren<TMP_Text>();
+                if (tmp == null) continue;
+                string name = go.name; // "Msg_Player", "Msg_DM", "Msg_System"
+                string type = name.Contains("Player") ? "Player"
+                            : name.Contains("DM")     ? "DM"
+                            : "System";
+                result.Add(new ChatMessageData { type = type, text = tmp.text });
+            }
+            return result;
+        }
+
         // ── Internal ──────────────────────────────────────────────────
 
         private void AddMessage(string text, MessageType type)
@@ -91,12 +121,16 @@ namespace DnD.UI
             GameObject msgGO = BuildMessageGO(text, type);
             activeMessages.Add(msgGO);
             TrimHistory();
+            // Force full canvas update so parent widths are known before rebuilding children
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(contentPanel);
             if (autoScroll) StartCoroutine(ScrollToBottom());
         }
 
         private GameObject BuildMessageGO(string text, MessageType type)
         {
-            var msgGO = new GameObject($"Msg_{type}");
+            // Create with RectTransform up front — cannot add one after the fact
+            var msgGO = new GameObject($"Msg_{type}", typeof(RectTransform));
             msgGO.transform.SetParent(contentPanel, false);
 
             // Size fitter so the bubble grows with text
@@ -152,7 +186,7 @@ namespace DnD.UI
 
         private IEnumerator TypewriterEffect(string fullText)
         {
-            var msgGO = new GameObject("Msg_DM");
+            var msgGO = new GameObject("Msg_DM", typeof(RectTransform));
             msgGO.transform.SetParent(contentPanel, false);
             var csf = msgGO.AddComponent<ContentSizeFitter>();
             csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
