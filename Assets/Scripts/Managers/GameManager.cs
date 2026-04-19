@@ -51,6 +51,16 @@ namespace DnD.Managers
         private async void Start()
         {
             await InitializeSystemsAsync();
+            // Yield one frame so all MonoBehaviour Awake/Start calls complete
+            // before ChatUI.Instance is accessed
+            await System.Threading.Tasks.Task.Yield();
+            // Fallback if singleton wasn't set in time
+            if (ChatUI.Instance == null)
+            {
+                var found = FindFirstObjectByType<ChatUI>();
+                if (found != null)
+                    ChatUI.Instance = found;
+            }
             ChangeState(GameState.MainMenu);
         }
 

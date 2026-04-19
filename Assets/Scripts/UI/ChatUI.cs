@@ -9,7 +9,7 @@ namespace DnD.UI
 {
     public class ChatUI : MonoBehaviour
     {
-        public static ChatUI Instance { get; private set; }
+        public static ChatUI Instance { get; internal set; }
 
         [Header("UI References")]
         [SerializeField] private ScrollRect scrollRect;
