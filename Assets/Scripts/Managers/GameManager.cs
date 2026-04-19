@@ -145,7 +145,7 @@ namespace DnD.Managers
             if (ChatUI.Instance == null) return;
             ChatUI.Instance.AddSystemMessage("✦  WELCOME TO D&D LLM  ✦");
             ChatUI.Instance.AddSystemMessage("An adventure powered by AI.");
-            ChatUI.Instance.AddSystemMessage("Type 'start' to begin — or describe the world you want to explore.");
+            ChatUI.Instance.AddSystemMessage("Describe the adventure you want to embark on...");
         }
 
         private void StartCharacterCreation()
@@ -175,15 +175,7 @@ namespace DnD.Managers
             switch (currentState)
             {
                 case GameState.MainMenu:
-                    if (lowerInput.Contains("start") || lowerInput.Contains("begin"))
-                    {
-                        ChangeState(GameState.CharacterCreation);
-                    }
-                    else
-                    {
-                        // Treat as campaign prompt
-                        await StartCampaignAsync(input);
-                    }
+                    await StartCampaignAsync(input);
                     break;
 
                 case GameState.CharacterCreation:
