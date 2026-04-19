@@ -431,9 +431,7 @@ public static class UISceneBuilder
 
         // ── Wire TitleScreen fields ──────────────────────────────────────
         var so = new SerializedObject(titleScreen);
-        var ngBtnProp = so.FindProperty("newGameButton");
-        if (ngBtnProp != null) ngBtnProp.objectReferenceValue = ngBtn;
-        else Debug.LogError("[UISceneBuilder] 'newGameButton' property not found on TitleScreen.");
+        SetProp(so, "newGameButton", ngBtn);
         SetArrayProp(so, "slotButtons",       slotButtons);
         SetArrayProp(so, "slotPortraits",     slotPortraits);
         SetArrayProp(so, "slotNameTexts",     slotNameTexts);
@@ -687,19 +685,19 @@ public static class UISceneBuilder
         // ── Wire CharacterCreationPopup fields ───────────────────────────
         var so = new SerializedObject(popup);
         SetArrayProp(so, "stepPanels", stepPanels);
-        so.FindProperty("nameInput").objectReferenceValue              = nameInput;
-        so.FindProperty("raceGridContainer").objectReferenceValue      = raceGrid.GetComponent<RectTransform>();
-        so.FindProperty("classGridContainer").objectReferenceValue     = classGrid.GetComponent<RectTransform>();
-        so.FindProperty("appearanceInput").objectReferenceValue        = appearanceInput;
-        so.FindProperty("backstoryInput").objectReferenceValue         = backstoryInput;
-        so.FindProperty("portraitImage").objectReferenceValue          = portraitRaw;
-        so.FindProperty("statsText").objectReferenceValue              = statsTMP;
-        so.FindProperty("beginButton").objectReferenceValue            = beginBtn;
-        so.FindProperty("nextButton").objectReferenceValue             = nextBtn;
-        so.FindProperty("backButton").objectReferenceValue             = backBtn;
-        so.FindProperty("cancelButton").objectReferenceValue           = cancelBtn;
+        SetProp(so, "nameInput", nameInput);
+        SetProp(so, "raceGridContainer", raceGrid.GetComponent<RectTransform>());
+        SetProp(so, "classGridContainer", classGrid.GetComponent<RectTransform>());
+        SetProp(so, "appearanceInput", appearanceInput);
+        SetProp(so, "backstoryInput", backstoryInput);
+        SetProp(so, "portraitImage", portraitRaw);
+        SetProp(so, "statsText", statsTMP);
+        SetProp(so, "beginButton", beginBtn);
+        SetProp(so, "nextButton", nextBtn);
+        SetProp(so, "backButton", backBtn);
+        SetProp(so, "cancelButton", cancelBtn);
         SetArrayProp(so, "stepBars", stepBars);
-        so.FindProperty("stepLabel").objectReferenceValue              = stepLabelTMP;
+        SetProp(so, "stepLabel", stepLabelTMP);
         so.ApplyModifiedProperties();
 
         // Wire to GameManager if present
@@ -725,6 +723,13 @@ public static class UISceneBuilder
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
+
+    private static void SetProp(SerializedObject so, string propName, UnityEngine.Object value)
+    {
+        var prop = so.FindProperty(propName);
+        if (prop == null) { Debug.LogError($"[UISceneBuilder] Property '{propName}' not found on {so.targetObject.GetType().Name}."); return; }
+        prop.objectReferenceValue = value;
+    }
 
     private static TMP_Text AddTitleLabel(Transform parent, string text, float size, Color color, float spacing)
     {
