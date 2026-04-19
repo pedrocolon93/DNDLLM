@@ -29,6 +29,7 @@ namespace DnD.UI
 
         private void Awake()
         {
+            Debug.Log($"[ChatUI] Awake on '{gameObject.name}', contentPanel={contentPanel}, scrollRect={scrollRect}");
             if (Instance == null) Instance = this;
             else Destroy(gameObject);
         }

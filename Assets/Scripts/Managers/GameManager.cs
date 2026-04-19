@@ -55,12 +55,10 @@ namespace DnD.Managers
             // before ChatUI.Instance is accessed
             await System.Threading.Tasks.Task.Yield();
             // Fallback if singleton wasn't set in time
-            if (ChatUI.Instance == null)
-            {
-                var found = FindFirstObjectByType<ChatUI>();
-                if (found != null)
-                    ChatUI.Instance = found;
-            }
+            var chatSearch = FindFirstObjectByType<ChatUI>(FindObjectsInactive.Include);
+            Debug.Log($"[GameManager] After yield: ChatUI.Instance={ChatUI.Instance}, FindResult={chatSearch}");
+            if (ChatUI.Instance == null && chatSearch != null)
+                ChatUI.Instance = chatSearch;
             ChangeState(GameState.MainMenu);
         }
 
@@ -152,6 +150,7 @@ namespace DnD.Managers
 
         private void ShowMainMenu()
         {
+            Debug.Log($"[GameManager] ShowMainMenu: ChatUI.Instance={ChatUI.Instance}");
             if (ChatUI.Instance == null) return;
             ChatUI.Instance.AddSystemMessage("✦  WELCOME TO D&D LLM  ✦");
             ChatUI.Instance.AddSystemMessage("An adventure powered by AI.");
