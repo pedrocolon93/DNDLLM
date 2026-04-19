@@ -23,8 +23,8 @@ namespace DnD.UI
         [SerializeField] private TMP_Text[] slotDateTexts;     // "2 days ago"
 
         // ── Events ────────────────────────────────────────────────────────
-        public event Action<int> OnSlotSelected;  // loaded slot index
-        public event Action      OnNewGame;
+        public Action<int> OnSlotSelected;  // loaded slot index (assigned by GameManager, not subscribed)
+        public Action      OnNewGame;
 
         private void OnEnable() => Refresh();
 
