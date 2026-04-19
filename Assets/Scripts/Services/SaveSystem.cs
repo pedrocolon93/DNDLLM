@@ -7,7 +7,6 @@ namespace DNDLLM.Services
 {
     public static class SaveSystem
     {
-        private const int SlotCount = 3;
         private static string SaveDir => Path.Combine(Application.persistentDataPath, "Saves");
 
         /// <summary>Loads one slot's SaveData + portrait. Returns (null, null) if slot is empty.</summary>
@@ -33,7 +32,10 @@ namespace DNDLLM.Services
             {
                 portrait = new Texture2D(2, 2);
                 if (!portrait.LoadImage(File.ReadAllBytes(pngPath)))
+                {
+                    UnityEngine.Object.DestroyImmediate(portrait);
                     portrait = null;
+                }
             }
 
             return (data, portrait);
@@ -47,16 +49,22 @@ namespace DNDLLM.Services
             data.lastPlayed = System.DateTime.UtcNow.ToString("o");
             File.WriteAllText(SlotJsonPath(slotIndex), JsonUtility.ToJson(data, prettyPrint: true));
             if (portrait != null)
-                File.WriteAllBytes(SlotPortraitPath(slotIndex), portrait.EncodeToPNG());
+            {
+                byte[] png = portrait.EncodeToPNG();
+                if (png != null)
+                    File.WriteAllBytes(SlotPortraitPath(slotIndex), png);
+                else
+                    Debug.LogWarning($"[SaveSystem] Portrait for slot {slotIndex} could not be encoded — skipping.");
+            }
         }
 
         /// <summary>Deletes all files for the given slot.</summary>
         public static void Delete(int slotIndex)
         {
-            string j = SlotJsonPath(slotIndex);
-            string p = SlotPortraitPath(slotIndex);
-            if (File.Exists(j)) File.Delete(j);
-            if (File.Exists(p)) File.Delete(p);
+            string jsonPath = SlotJsonPath(slotIndex);
+            string portraitPath = SlotPortraitPath(slotIndex);
+            if (File.Exists(jsonPath)) File.Delete(jsonPath);
+            if (File.Exists(portraitPath)) File.Delete(portraitPath);
         }
 
         private static string SlotJsonPath(int i)     => Path.Combine(SaveDir, $"slot_{i}.json");
