@@ -1,7 +1,6 @@
 using UnityEngine;
 using System.Collections;
 using System.Threading.Tasks;
-using DNDLLM.Core;
 using DNDLLM.Services;
 
 namespace DNDLLM.Story
@@ -44,12 +43,8 @@ namespace DNDLLM.Story
             
             Debug.Log($"Map Keywords: {keywords}");
 
-            // 3. Transition to Map Generation
-            if (GameManager.Instance != null)
-            {
-                GameManager.Instance.GeneratedMapKeywords = keywords;
-                GameManager.Instance.ChangeState(GameState.MapGeneration);
-            }
+            // 3. Transition to Map Generation (legacy GameManager removed; wiring handled by Task 7)
+            Debug.Log($"[StoryEngine] Map keywords ready: {keywords}");
         }
     }
 }
