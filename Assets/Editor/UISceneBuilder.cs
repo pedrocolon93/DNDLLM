@@ -460,6 +460,270 @@ public static class UISceneBuilder
         Debug.Log("[UISceneBuilder] Title screen built. Press Ctrl+S to save.");
     }
 
+    [MenuItem("DnD/Build Character Popup")]
+    public static void BuildCharacterPopup()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        // Remove old popup canvas
+        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterCreationPopup>(FindObjectsSortMode.None))
+            Undo.DestroyObjectImmediate(p.gameObject);
+
+        // ── Canvas (sortingOrder=10) ────────────────────────────────────
+        var canvasGO = new GameObject("CharacterPopupCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build Char Popup");
+
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 10;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        var popup = canvasGO.AddComponent<DnD.UI.CharacterCreationPopup>();
+
+        // ── Semi-transparent overlay ────────────────────────────────────
+        var overlayGO = MakeGO("Overlay", canvasGO.transform);
+        var overlayRT = overlayGO.GetComponent<RectTransform>();
+        overlayRT.anchorMin = Vector2.zero; overlayRT.anchorMax = Vector2.one;
+        overlayRT.offsetMin = Vector2.zero; overlayRT.offsetMax = Vector2.zero;
+        overlayGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.75f);
+
+        // ── Popup panel (centered, fixed size) ─────────────────────────
+        var panelGO = MakeGO("PopupPanel", overlayGO.transform);
+        var panelRT = panelGO.GetComponent<RectTransform>();
+        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRT.pivot            = new Vector2(0.5f, 0.5f);
+        panelRT.anchoredPosition = Vector2.zero;
+        panelRT.sizeDelta        = new Vector2(420f, 520f);
+        panelGO.AddComponent<Image>().color = UITheme.BackgroundDeep;
+        var panelVLG = panelGO.AddComponent<VerticalLayoutGroup>();
+        panelVLG.padding              = new RectOffset(0, 0, 0, 0);
+        panelVLG.spacing              = 0f;
+        panelVLG.childForceExpandWidth  = true;
+        panelVLG.childForceExpandHeight = false;
+        panelVLG.childControlWidth   = true;
+        panelVLG.childControlHeight  = true;
+
+        // Header
+        var headerGO = MakeGO("Header", panelGO.transform);
+        headerGO.AddComponent<LayoutElement>().preferredHeight = 44f;
+        headerGO.AddComponent<Image>().color = new Color32(0x12, 0x0C, 0x03, 0xFF);
+        var headerTextGO = MakeGO("Text", headerGO.transform);
+        var hRT = headerTextGO.GetComponent<RectTransform>();
+        hRT.anchorMin = Vector2.zero; hRT.anchorMax = Vector2.one;
+        hRT.offsetMin = Vector2.zero; hRT.offsetMax = Vector2.zero;
+        var hTMP = headerTextGO.AddComponent<TextMeshProUGUI>();
+        hTMP.text = "CREATE YOUR HERO";
+        hTMP.fontSize = UITheme.FontHeader;
+        hTMP.color = UITheme.GoldAccent;
+        hTMP.alignment = TextAlignmentOptions.Center;
+        hTMP.characterSpacing = 1.5f;
+
+        // Step indicator row (5 bars)
+        var barRowGO = MakeGO("StepIndicator", panelGO.transform);
+        barRowGO.AddComponent<LayoutElement>().preferredHeight = 10f;
+        barRowGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var barHLG = barRowGO.AddComponent<HorizontalLayoutGroup>();
+        barHLG.padding  = new RectOffset(16, 16, 3, 3);
+        barHLG.spacing  = 4f;
+        barHLG.childForceExpandHeight = true;
+        barHLG.childForceExpandWidth  = true;
+        barHLG.childControlHeight = true;
+        barHLG.childControlWidth  = true;
+        var stepBars = new Image[5];
+        for (int i = 0; i < 5; i++)
+        {
+            var barGO = MakeGO($"Bar{i}", barRowGO.transform);
+            stepBars[i] = barGO.AddComponent<Image>();
+            stepBars[i].color = new Color32(0x4A, 0x38, 0x20, 0xFF);
+        }
+
+        // Step label
+        var stepLabelGO = MakeGO("StepLabel", panelGO.transform);
+        stepLabelGO.AddComponent<LayoutElement>().preferredHeight = 26f;
+        stepLabelGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var stepLabelTMP = stepLabelGO.AddComponent<TextMeshProUGUI>();
+        stepLabelTMP.text      = "Step 1 of 5 — NAME";
+        stepLabelTMP.fontSize  = 11f;
+        stepLabelTMP.color     = UITheme.SystemText;
+        stepLabelTMP.alignment = TextAlignmentOptions.Center;
+
+        // Content container (fills remaining space)
+        var contentGO = MakeGO("ContentContainer", panelGO.transform);
+        contentGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        contentGO.AddComponent<Image>().color = Color.clear;
+
+        // Helper: make a step panel inside contentGO
+        System.Func<string, GameObject> makeStepPanel = (name) =>
+        {
+            var go = MakeGO(name, contentGO.transform);
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+            go.AddComponent<Image>().color = Color.clear;
+            var vlg = go.AddComponent<VerticalLayoutGroup>();
+            vlg.padding = new RectOffset(20, 20, 16, 8);
+            vlg.spacing = 10f;
+            vlg.childForceExpandWidth  = true;
+            vlg.childForceExpandHeight = false;
+            vlg.childControlWidth  = true;
+            vlg.childControlHeight = true;
+            return go;
+        };
+
+        // ── Step panels ─────────────────────────────────────────────────
+        var stepPanels = new GameObject[6];
+
+        // Panel 0: Name
+        stepPanels[0] = makeStepPanel("NamePanel");
+        AddPromptLabel(stepPanels[0].transform, "What is your hero called?");
+        var nameInput = MakeInputField(stepPanels[0].transform, "Adventurer", false);
+
+        // Panel 1: Race
+        stepPanels[1] = makeStepPanel("RacePanel");
+        AddPromptLabel(stepPanels[1].transform, "Choose your race:");
+        var raceGrid = MakeGO("RaceGrid", stepPanels[1].transform);
+        raceGrid.AddComponent<Image>().color = Color.clear;
+        raceGrid.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        var raceGLG = raceGrid.AddComponent<GridLayoutGroup>();
+        raceGLG.cellSize    = new Vector2(115f, 36f);
+        raceGLG.spacing     = new Vector2(4f, 4f);
+        raceGLG.constraint  = GridLayoutGroup.Constraint.FixedColumnCount;
+        raceGLG.constraintCount = 3;
+
+        // Panel 2: Class
+        stepPanels[2] = makeStepPanel("ClassPanel");
+        AddPromptLabel(stepPanels[2].transform, "Choose your class:");
+        var classGrid = MakeGO("ClassGrid", stepPanels[2].transform);
+        classGrid.AddComponent<Image>().color = Color.clear;
+        classGrid.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        var classGLG = classGrid.AddComponent<GridLayoutGroup>();
+        classGLG.cellSize    = new Vector2(85f, 36f);
+        classGLG.spacing     = new Vector2(4f, 4f);
+        classGLG.constraint  = GridLayoutGroup.Constraint.FixedColumnCount;
+        classGLG.constraintCount = 4;
+
+        // Panel 3: Appearance
+        stepPanels[3] = makeStepPanel("AppearancePanel");
+        AddPromptLabel(stepPanels[3].transform, "Describe your hero's appearance:");
+        var appearanceInput = MakeInputField(stepPanels[3].transform, "Tall, scarred warrior with dark hair...", true);
+        stepPanels[3].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
+
+        // Panel 4: Backstory
+        stepPanels[4] = makeStepPanel("BackstoryPanel");
+        AddPromptLabel(stepPanels[4].transform, "What brought you to this adventure?");
+        var backstoryInput = MakeInputField(stepPanels[4].transform, "My village was destroyed...", true);
+        stepPanels[4].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
+
+        // Panel 5: Confirm
+        stepPanels[5] = makeStepPanel("ConfirmPanel");
+        var confirmRowGO = MakeGO("PortraitRow", stepPanels[5].transform);
+        confirmRowGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        confirmRowGO.AddComponent<Image>().color = Color.clear;
+        var cHLG = confirmRowGO.AddComponent<HorizontalLayoutGroup>();
+        cHLG.spacing = 12f;
+        cHLG.childForceExpandHeight = true;
+        cHLG.childForceExpandWidth  = false;
+        cHLG.childControlHeight = true;
+        cHLG.childControlWidth  = true;
+
+        // Portrait image
+        var portraitGO = MakeGO("PortraitImage", confirmRowGO.transform);
+        portraitGO.AddComponent<LayoutElement>().preferredWidth = 100f;
+        portraitGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var portraitRaw = portraitGO.AddComponent<RawImage>();
+        portraitRaw.color = Color.white;
+
+        // Stats text
+        var statsGO = MakeGO("StatsText", confirmRowGO.transform);
+        statsGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        var statsTMP = statsGO.AddComponent<TextMeshProUGUI>();
+        statsTMP.color    = UITheme.DmText;
+        statsTMP.fontSize = 14f;
+        statsTMP.alignment = TextAlignmentOptions.TopLeft;
+
+        // Begin button
+        var beginGO = MakeGO("BeginButton", stepPanels[5].transform);
+        beginGO.AddComponent<LayoutElement>().preferredHeight = 44f;
+        var beginImg = beginGO.AddComponent<Image>();
+        beginImg.color = UITheme.GoldAccent;
+        var beginBtn = beginGO.AddComponent<Button>();
+        beginBtn.targetGraphic = beginImg;
+        var beginBtnColors = beginBtn.colors;
+        beginBtnColors.disabledColor = new Color32(0x4A, 0x38, 0x20, 0xFF);
+        beginBtn.colors = beginBtnColors;
+        var beginTextGO = MakeGO("Text", beginGO.transform);
+        var btRT = beginTextGO.GetComponent<RectTransform>();
+        btRT.anchorMin = Vector2.zero; btRT.anchorMax = Vector2.one;
+        btRT.offsetMin = Vector2.zero; btRT.offsetMax = Vector2.zero;
+        var beginTMP = beginTextGO.AddComponent<TextMeshProUGUI>();
+        beginTMP.text      = "Begin Adventure";
+        beginTMP.fontSize  = 16f;
+        beginTMP.color     = UITheme.BackgroundDeep;
+        beginTMP.alignment = TextAlignmentOptions.Center;
+
+        // ── Nav row ───────────────────────────────────────────────────────
+        var navRowGO = MakeGO("NavRow", panelGO.transform);
+        navRowGO.AddComponent<LayoutElement>().preferredHeight = 44f;
+        navRowGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var navHLG = navRowGO.AddComponent<HorizontalLayoutGroup>();
+        navHLG.padding  = new RectOffset(12, 12, 6, 6);
+        navHLG.spacing  = 8f;
+        navHLG.childForceExpandHeight = true;
+        navHLG.childForceExpandWidth  = false;
+        navHLG.childControlHeight = true;
+        navHLG.childControlWidth  = true;
+
+        var cancelBtn = MakeNavButton("CancelButton", "Cancel", navRowGO.transform, UITheme.BackgroundDeep, UITheme.SystemText, 80f);
+        var backBtn   = MakeNavButton("BackButton",   "< Back", navRowGO.transform, UITheme.BackgroundDeep, UITheme.DmText, 80f);
+        var navSpacer = MakeGO("Spacer", navRowGO.transform);
+        navSpacer.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        var nextBtn   = MakeNavButton("NextButton",   "Next >", navRowGO.transform, UITheme.GoldAccent, UITheme.BackgroundDeep, 80f);
+
+        // ── Wire CharacterCreationPopup fields ───────────────────────────
+        var so = new SerializedObject(popup);
+        SetArrayProp(so, "stepPanels", stepPanels);
+        so.FindProperty("nameInput").objectReferenceValue              = nameInput;
+        so.FindProperty("raceGridContainer").objectReferenceValue      = raceGrid.GetComponent<RectTransform>();
+        so.FindProperty("classGridContainer").objectReferenceValue     = classGrid.GetComponent<RectTransform>();
+        so.FindProperty("appearanceInput").objectReferenceValue        = appearanceInput;
+        so.FindProperty("backstoryInput").objectReferenceValue         = backstoryInput;
+        so.FindProperty("portraitImage").objectReferenceValue          = portraitRaw;
+        so.FindProperty("statsText").objectReferenceValue              = statsTMP;
+        so.FindProperty("beginButton").objectReferenceValue            = beginBtn;
+        so.FindProperty("nextButton").objectReferenceValue             = nextBtn;
+        so.FindProperty("backButton").objectReferenceValue             = backBtn;
+        so.FindProperty("cancelButton").objectReferenceValue           = cancelBtn;
+        SetArrayProp(so, "stepBars", stepBars);
+        so.FindProperty("stepLabel").objectReferenceValue              = stepLabelTMP;
+        so.ApplyModifiedProperties();
+
+        // Wire to GameManager if present
+        var gmGO = GameObject.Find("GameSystem");
+        if (gmGO != null)
+        {
+            var gm = gmGO.GetComponent<DnD.Managers.GameManager>();
+            if (gm != null)
+            {
+                var gmSO = new SerializedObject(gm);
+                gmSO.FindProperty("characterPopup").objectReferenceValue = popup;
+                gmSO.ApplyModifiedProperties();
+            }
+        }
+
+        // Deactivate all step panels except 0
+        for (int i = 1; i < stepPanels.Length; i++)
+            stepPanels[i].SetActive(false);
+
+        Canvas.ForceUpdateCanvases();
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] Character popup built. Press Ctrl+S to save.");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────
 
     private static TMP_Text AddTitleLabel(Transform parent, string text, float size, Color color, float spacing)
@@ -509,6 +773,80 @@ public static class UISceneBuilder
         var go = MakeGO(name, parent);
         go.AddComponent<Image>().color = color;
         return go;
+    }
+
+    private static void AddPromptLabel(Transform parent, string text)
+    {
+        var go  = MakeGO("Prompt", parent);
+        go.AddComponent<LayoutElement>().preferredHeight = 24f;
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        tmp.text      = text;
+        tmp.fontSize  = 13f;
+        tmp.color     = UITheme.SystemText;
+        tmp.alignment = TextAlignmentOptions.TopLeft;
+    }
+
+    private static TMP_InputField MakeInputField(Transform parent, string placeholder, bool multiline)
+    {
+        var go  = MakeGO("InputField", parent);
+        var le  = go.AddComponent<LayoutElement>();
+        if (multiline) le.flexibleHeight = 1f;
+        else           le.preferredHeight = 40f;
+        go.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var field = go.AddComponent<TMP_InputField>();
+        if (multiline)
+            field.lineType = TMP_InputField.LineType.MultiLineNewline;
+
+        var textAreaGO = MakeGO("Text Area", go.transform);
+        var taRT = textAreaGO.GetComponent<RectTransform>();
+        taRT.anchorMin = Vector2.zero; taRT.anchorMax = Vector2.one;
+        taRT.offsetMin = new Vector2(8, 4); taRT.offsetMax = new Vector2(-8, -4);
+        textAreaGO.AddComponent<RectMask2D>();
+        field.textViewport = taRT;
+
+        var phGO = MakeGO("Placeholder", textAreaGO.transform);
+        var phRT = phGO.GetComponent<RectTransform>();
+        phRT.anchorMin = Vector2.zero; phRT.anchorMax = Vector2.one;
+        phRT.offsetMin = Vector2.zero; phRT.offsetMax = Vector2.zero;
+        var phTMP = phGO.AddComponent<TextMeshProUGUI>();
+        phTMP.text      = placeholder;
+        phTMP.color     = UITheme.PlaceholderText;
+        phTMP.fontSize  = UITheme.FontInput;
+        phTMP.fontStyle = FontStyles.Italic;
+        phTMP.enableWordWrapping = multiline;
+        field.placeholder = phTMP;
+
+        var txtGO = MakeGO("Text", textAreaGO.transform);
+        var txtRT = txtGO.GetComponent<RectTransform>();
+        txtRT.anchorMin = Vector2.zero; txtRT.anchorMax = Vector2.one;
+        txtRT.offsetMin = Vector2.zero; txtRT.offsetMax = Vector2.zero;
+        var txtTMP = txtGO.AddComponent<TextMeshProUGUI>();
+        txtTMP.color    = UITheme.InputText;
+        txtTMP.fontSize = UITheme.FontInput;
+        txtTMP.enableWordWrapping = multiline;
+        field.textComponent = txtTMP;
+
+        return field;
+    }
+
+    private static Button MakeNavButton(string name, string label, Transform parent, Color32 bgColor, Color32 textColor, float width)
+    {
+        var go  = MakeGO(name, parent);
+        go.AddComponent<LayoutElement>().preferredWidth = width;
+        var img = go.AddComponent<Image>();
+        img.color = bgColor;
+        var btn = go.AddComponent<Button>();
+        btn.targetGraphic = img;
+        var textGO = MakeGO("Text", go.transform);
+        var tRT = textGO.GetComponent<RectTransform>();
+        tRT.anchorMin = Vector2.zero; tRT.anchorMax = Vector2.one;
+        tRT.offsetMin = Vector2.zero; tRT.offsetMax = Vector2.zero;
+        var tmp = textGO.AddComponent<TextMeshProUGUI>();
+        tmp.text      = label;
+        tmp.fontSize  = 13f;
+        tmp.color     = textColor;
+        tmp.alignment = TextAlignmentOptions.Center;
+        return btn;
     }
 
     private static void AddHeader(Transform parent, string title)
