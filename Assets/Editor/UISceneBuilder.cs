@@ -14,7 +14,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // ── Remove old Canvas ─────────────────────────────────────────
-        foreach (var c in Object.FindObjectsOfType<Canvas>())
+        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(c.gameObject);
 
         // ── Canvas root ───────────────────────────────────────────────
@@ -175,6 +175,7 @@ public static class UISceneBuilder
         btnImg.color = UITheme.GoldAccent;
         btnGO.AddComponent<LayoutElement>().preferredWidth = 60;
         var btn = btnGO.AddComponent<Button>();
+        btn.targetGraphic = btnImg;
         var colors = btn.colors;
         colors.normalColor    = UITheme.GoldAccent;
         colors.highlightedColor = new Color32(0xE0, 0xC0, 0x70, 0xFF);
@@ -230,7 +231,6 @@ public static class UISceneBuilder
     {
         var go = new GameObject(name);
         go.transform.SetParent(parent, false);
-        go.AddComponent<RectTransform>();
         return go;
     }
 
