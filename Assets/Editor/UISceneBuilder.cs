@@ -58,7 +58,7 @@ public static class UISceneBuilder
         mapVLG.childControlWidth = true;
         mapVLG.childControlHeight = true;
 
-        AddHeader(mapPanel.transform, "✦  THE MAP  ✦");
+        AddHeader(mapPanel.transform, "THE MAP");
 
         var mapDisplayGO = MakeGO("MapDisplay", mapPanel.transform);
         mapDisplayGO.AddComponent<RawImage>().color = Color.white;
@@ -75,7 +75,7 @@ public static class UISceneBuilder
         chatVLG.childControlWidth = true;
         chatVLG.childControlHeight = true;
 
-        AddHeader(chatPanel.transform, "✦  DUNGEON MASTER  ✦");
+        AddHeader(chatPanel.transform, "DUNGEON MASTER");
 
         // ── Scroll view ───────────────────────────────────────────────
         var scrollGO = MakeGO("ScrollView", chatPanel.transform);
@@ -94,9 +94,8 @@ public static class UISceneBuilder
         viewportRT.anchorMax = Vector2.one;
         viewportRT.offsetMin = Vector2.zero;
         viewportRT.offsetMax = Vector2.zero;
-        viewportGO.AddComponent<Image>().color = Color.clear;
-        var mask = viewportGO.AddComponent<Mask>();
-        mask.showMaskGraphic = false;
+        // RectMask2D clips to bounds without needing a visible Image (Mask+alpha=0 hides everything)
+        viewportGO.AddComponent<RectMask2D>();
         scrollRect.viewport = viewportRT;
 
         var contentGO = MakeGO("Content", viewportGO.transform);
@@ -132,7 +131,7 @@ public static class UISceneBuilder
 
         // Input field container
         var inputGO = MakeGO("InputField", inputRow.transform);
-        inputGO.AddComponent<Image>().color = UITheme.BackgroundDeep;
+        inputGO.AddComponent<Image>().color = new Color32(0x38, 0x28, 0x10, 0xFF); // visibly lighter than panel
         inputGO.AddComponent<LayoutElement>().flexibleWidth = 1;
         var inputField = inputGO.AddComponent<TMP_InputField>();
 
@@ -187,7 +186,7 @@ public static class UISceneBuilder
         btnTextRT.anchorMin = Vector2.zero; btnTextRT.anchorMax = Vector2.one;
         btnTextRT.offsetMin = Vector2.zero; btnTextRT.offsetMax = Vector2.zero;
         var btnTMP = btnTextGO.AddComponent<TextMeshProUGUI>();
-        btnTMP.text = "▶";
+        btnTMP.text = "Send";
         btnTMP.fontSize = 20;
         btnTMP.color = UITheme.BackgroundDeep;
         btnTMP.alignment = TextAlignmentOptions.Center;
@@ -216,6 +215,41 @@ public static class UISceneBuilder
         mapCam.transform.position = new Vector3(4.5f, 10f, 4.5f);
         mapCam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
         mapCamGO.AddComponent<MapCameraController>();
+
+        // ── Menu button (top-right, floats above split) ───────────────────
+        var menuBtnGO = MakeGO("MenuButton", canvasGO.transform);
+        var menuBtnRT = menuBtnGO.GetComponent<RectTransform>();
+        menuBtnRT.anchorMin  = new Vector2(1f, 1f);
+        menuBtnRT.anchorMax  = new Vector2(1f, 1f);
+        menuBtnRT.pivot      = new Vector2(1f, 1f);
+        menuBtnRT.anchoredPosition = new Vector2(-8f, -8f);
+        menuBtnRT.sizeDelta  = new Vector2(64f, 28f);
+        var menuBtnImg = menuBtnGO.AddComponent<Image>();
+        menuBtnImg.color = new Color32(0x12, 0x0C, 0x03, 0xCC);
+        var menuBtn = menuBtnGO.AddComponent<Button>();
+        menuBtn.targetGraphic = menuBtnImg;
+        var menuBtnTextGO = MakeGO("Text", menuBtnGO.transform);
+        var menuBtnTextRT  = menuBtnTextGO.GetComponent<RectTransform>();
+        menuBtnTextRT.anchorMin = Vector2.zero; menuBtnTextRT.anchorMax = Vector2.one;
+        menuBtnTextRT.offsetMin = Vector2.zero; menuBtnTextRT.offsetMax = Vector2.zero;
+        var menuBtnTMP = menuBtnTextGO.AddComponent<TextMeshProUGUI>();
+        menuBtnTMP.text      = "MENU";
+        menuBtnTMP.fontSize  = 11f;
+        menuBtnTMP.color     = UITheme.GoldAccent;
+        menuBtnTMP.alignment = TextAlignmentOptions.Center;
+
+        // Wire menuButton to GameManager if present
+        var gameSystemGO = GameObject.Find("GameSystem");
+        if (gameSystemGO != null)
+        {
+            var gm = gameSystemGO.GetComponent<DnD.Managers.GameManager>();
+            if (gm != null)
+            {
+                var gmSO = new SerializedObject(gm);
+                gmSO.FindProperty("menuButton").objectReferenceValue = menuBtn;
+                gmSO.ApplyModifiedProperties();
+            }
+        }
 
         EditorSceneManager.MarkSceneDirty(scene);
         Debug.Log("[UISceneBuilder] Canvas rebuilt. Press Ctrl+S to save the scene.");
@@ -247,7 +281,217 @@ public static class UISceneBuilder
         EditorSceneManager.MarkSceneDirty(scene);
     }
 
+    [MenuItem("DnD/Build Title Screen")]
+    public static void BuildTitleScreen()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        // Remove old TitleScreen canvas if present
+        foreach (var c in Object.FindObjectsByType<DnD.UI.TitleScreen>(FindObjectsSortMode.None))
+            Undo.DestroyObjectImmediate(c.gameObject);
+
+        // ── Canvas (sortingOrder=20, renders above everything) ─────────
+        var canvasGO = new GameObject("TitleScreenCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build Title Screen");
+
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 20;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        var titleScreen = canvasGO.AddComponent<DnD.UI.TitleScreen>();
+
+        // ── Full-screen dark background ─────────────────────────────────
+        var bgGO = MakeGO("Background", canvasGO.transform);
+        var bgRT = bgGO.GetComponent<RectTransform>();
+        bgRT.anchorMin = Vector2.zero; bgRT.anchorMax = Vector2.one;
+        bgRT.offsetMin = Vector2.zero; bgRT.offsetMax = Vector2.zero;
+        bgGO.AddComponent<Image>().color = new Color32(0x0D, 0x08, 0x05, 0xFF);
+
+        // ── Center panel (fixed width, centered) ────────────────────────
+        var panelGO = MakeGO("CenterPanel", bgGO.transform);
+        var panelRT = panelGO.GetComponent<RectTransform>();
+        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRT.pivot            = new Vector2(0.5f, 0.5f);
+        panelRT.anchoredPosition = Vector2.zero;
+        panelRT.sizeDelta        = new Vector2(440f, 0f);
+        var panelVLG = panelGO.AddComponent<VerticalLayoutGroup>();
+        panelVLG.spacing              = 8f;
+        panelVLG.padding              = new RectOffset(0, 0, 0, 0);
+        panelVLG.childForceExpandWidth  = true;
+        panelVLG.childForceExpandHeight = false;
+        panelVLG.childControlWidth   = true;
+        panelVLG.childControlHeight  = true;
+        panelGO.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // Logo
+        AddTitleLabel(panelGO.transform, "D&D LLM", 28f, UITheme.GoldAccent, 10f);
+        AddTitleLabel(panelGO.transform, "AN AI ADVENTURE", 11f, UITheme.SystemText, 2f);
+
+        // Divider
+        var divGO = MakeGO("Divider", panelGO.transform);
+        divGO.AddComponent<LayoutElement>().preferredHeight = 1f;
+        divGO.AddComponent<Image>().color = UITheme.GoldAccent;
+
+        // Spacer
+        var spacerLE = MakeGO("Spacer", panelGO.transform).AddComponent<LayoutElement>();
+        spacerLE.preferredHeight = 8f;
+
+        // New Game button
+        var newGameGO  = MakeGO("NewGameButton", panelGO.transform);
+        newGameGO.AddComponent<LayoutElement>().preferredHeight = 48f;
+        var ngImg = newGameGO.AddComponent<Image>();
+        ngImg.color = UITheme.GoldAccent;
+        var ngBtn = newGameGO.AddComponent<Button>();
+        ngBtn.targetGraphic = ngImg;
+        var ngColors = ngBtn.colors;
+        ngColors.highlightedColor = new Color32(0xE0, 0xC0, 0x70, 0xFF);
+        ngColors.pressedColor     = new Color32(0xA0, 0x80, 0x30, 0xFF);
+        ngBtn.colors = ngColors;
+        var ngTextGO = MakeGO("Text", newGameGO.transform);
+        var ngTextRT  = ngTextGO.GetComponent<RectTransform>();
+        ngTextRT.anchorMin = Vector2.zero; ngTextRT.anchorMax = Vector2.one;
+        ngTextRT.offsetMin = Vector2.zero; ngTextRT.offsetMax = Vector2.zero;
+        var ngTMP = ngTextGO.AddComponent<TextMeshProUGUI>();
+        ngTMP.text = "+ NEW GAME";
+        ngTMP.fontSize = 16f;
+        ngTMP.color = UITheme.BackgroundDeep;
+        ngTMP.alignment = TextAlignmentOptions.Center;
+        ngTMP.characterSpacing = 2f;
+
+        // Continue label
+        AddTitleLabel(panelGO.transform, "CONTINUE ADVENTURE", 10f, UITheme.SystemText, 1.5f);
+
+        // Slot rows x3
+        var slotButtons       = new Button[3];
+        var slotPortraits     = new RawImage[3];
+        var slotNameTexts     = new TMP_Text[3];
+        var slotSubTexts      = new TMP_Text[3];
+        var slotCampaignTexts = new TMP_Text[3];
+        var slotDateTexts     = new TMP_Text[3];
+
+        for (int i = 0; i < 3; i++)
+        {
+            var rowGO = MakeGO($"SlotRow_{i}", panelGO.transform);
+            rowGO.AddComponent<LayoutElement>().preferredHeight = 60f;
+            var rowImg = rowGO.AddComponent<Image>();
+            rowImg.color = UITheme.BackgroundMid;
+            var rowBtn = rowGO.AddComponent<Button>();
+            rowBtn.targetGraphic = rowImg;
+            var rowColors = rowBtn.colors;
+            rowColors.highlightedColor = new Color32(0x2A, 0x1F, 0x0E, 0xFF);
+            rowBtn.colors = rowColors;
+            var rowHLG = rowGO.AddComponent<HorizontalLayoutGroup>();
+            rowHLG.spacing = 8f;
+            rowHLG.padding = new RectOffset(10, 10, 8, 8);
+            rowHLG.childForceExpandHeight = true;
+            rowHLG.childForceExpandWidth  = false;
+            rowHLG.childControlHeight = true;
+            rowHLG.childControlWidth  = true;
+
+            // Portrait thumbnail
+            var portraitGO = MakeGO("Portrait", rowGO.transform);
+            portraitGO.AddComponent<LayoutElement>().preferredWidth = 40f;
+            portraitGO.AddComponent<Image>().color = UITheme.BackgroundDeep;
+            var rawImg = portraitGO.AddComponent<RawImage>();
+            rawImg.color = Color.white;
+            slotPortraits[i] = rawImg;
+
+            // Info column
+            var infoGO = MakeGO("Info", rowGO.transform);
+            infoGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
+            var infoVLG = infoGO.AddComponent<VerticalLayoutGroup>();
+            infoVLG.childForceExpandWidth  = true;
+            infoVLG.childForceExpandHeight = false;
+            infoVLG.childControlWidth  = true;
+            infoVLG.childControlHeight = true;
+            infoVLG.spacing = 2f;
+
+            slotNameTexts[i]     = AddInfoText(infoGO.transform, "Name",     UITheme.DmText,          14f);
+            slotSubTexts[i]      = AddInfoText(infoGO.transform, "Sub",      UITheme.SystemText,       11f);
+            slotCampaignTexts[i] = AddInfoText(infoGO.transform, "Campaign", UITheme.SystemText,       10f);
+            slotDateTexts[i]     = AddInfoText(infoGO.transform, "Date",     UITheme.PlaceholderText,  10f);
+
+            // Chevron
+            var chevronGO = MakeGO("Chevron", rowGO.transform);
+            chevronGO.AddComponent<LayoutElement>().preferredWidth = 20f;
+            var chevTMP = chevronGO.AddComponent<TextMeshProUGUI>();
+            chevTMP.text      = "›";
+            chevTMP.fontSize  = 20f;
+            chevTMP.color     = UITheme.GoldAccent;
+            chevTMP.alignment = TextAlignmentOptions.MidlineRight;
+
+            slotButtons[i] = rowBtn;
+        }
+
+        // ── Wire TitleScreen fields ──────────────────────────────────────
+        var so = new SerializedObject(titleScreen);
+        so.FindProperty("newGameButton").objectReferenceValue = ngBtn;
+        SetArrayProp(so, "slotButtons",       slotButtons);
+        SetArrayProp(so, "slotPortraits",     slotPortraits);
+        SetArrayProp(so, "slotNameTexts",     slotNameTexts);
+        SetArrayProp(so, "slotSubTexts",      slotSubTexts);
+        SetArrayProp(so, "slotCampaignTexts", slotCampaignTexts);
+        SetArrayProp(so, "slotDateTexts",     slotDateTexts);
+        so.ApplyModifiedProperties();
+
+        // Wire to GameManager if present
+        var gmGO = GameObject.Find("GameSystem");
+        if (gmGO != null)
+        {
+            var gm = gmGO.GetComponent<DnD.Managers.GameManager>();
+            if (gm != null)
+            {
+                var gmSO = new SerializedObject(gm);
+                gmSO.FindProperty("titleScreen").objectReferenceValue = titleScreen;
+                gmSO.ApplyModifiedProperties();
+            }
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] Title screen built. Press Ctrl+S to save.");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────
+
+    private static TMP_Text AddTitleLabel(Transform parent, string text, float size, Color color, float spacing)
+    {
+        var go = MakeGO("Label_" + text.Replace(" ", ""), parent);
+        go.AddComponent<LayoutElement>().preferredHeight = size + 10f;
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        tmp.text             = text;
+        tmp.fontSize         = size;
+        tmp.color            = color;
+        tmp.alignment        = TextAlignmentOptions.Center;
+        tmp.characterSpacing = spacing;
+        return tmp;
+    }
+
+    private static TMP_Text AddInfoText(Transform parent, string name, Color color, float size)
+    {
+        var go = MakeGO(name, parent);
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredHeight = size + 4f;
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        tmp.color    = color;
+        tmp.fontSize = size;
+        tmp.enableWordWrapping = false;
+        return tmp;
+    }
+
+    private static void SetArrayProp<T>(SerializedObject so, string propName, T[] values)
+        where T : UnityEngine.Object
+    {
+        var prop = so.FindProperty(propName);
+        prop.arraySize = values.Length;
+        for (int i = 0; i < values.Length; i++)
+            prop.GetArrayElementAtIndex(i).objectReferenceValue = values[i];
+    }
 
     private static GameObject MakeGO(string name, Transform parent)
     {
