@@ -23,21 +23,24 @@ namespace DnD.UI
         [SerializeField] private TMP_Text[] slotDateTexts;     // "2 days ago"
 
         // ── Events ────────────────────────────────────────────────────────
-        public Action<int> OnSlotSelected;  // loaded slot index
-        public Action      OnNewGame;
+        public event Action<int> OnSlotSelected;  // loaded slot index
+        public event Action      OnNewGame;
 
         private void OnEnable() => Refresh();
 
         public void Refresh()
         {
-            if (newGameButton == null)
-            {
-                Debug.LogError("[TitleScreen] newGameButton is not assigned in the Inspector.", this);
-                return;
-            }
+            if (Application.isPlaying == false) return;
 
-            newGameButton.onClick.RemoveAllListeners();
-            newGameButton.onClick.AddListener(() => OnNewGame?.Invoke());
+            if (newGameButton != null)
+            {
+                newGameButton.onClick.RemoveAllListeners();
+                newGameButton.onClick.AddListener(() => OnNewGame?.Invoke());
+            }
+            else
+            {
+                Debug.LogWarning("[TitleScreen] newGameButton is not assigned in the Inspector.", this);
+            }
 
             for (int i = 0; i < 3; i++)
             {
@@ -66,8 +69,12 @@ namespace DnD.UI
                     if (slotDateTexts != null && i < slotDateTexts.Length && slotDateTexts[i] != null)
                         slotDateTexts[i].text = FormatDate(data.lastPlayed);
 
-                    if (portrait != null && slotPortraits != null && i < slotPortraits.Length && slotPortraits[i] != null)
+                    if (slotPortraits != null && i < slotPortraits.Length && slotPortraits[i] != null)
+                    {
+                        var oldTex = slotPortraits[i].texture;
+                        if (oldTex != null) UnityEngine.Object.Destroy(oldTex);
                         slotPortraits[i].texture = portrait;
+                    }
                 }
                 else
                 {
@@ -82,6 +89,13 @@ namespace DnD.UI
 
                     if (slotDateTexts != null && i < slotDateTexts.Length && slotDateTexts[i] != null)
                         slotDateTexts[i].text = "";
+
+                    if (slotPortraits != null && i < slotPortraits.Length && slotPortraits[i] != null)
+                    {
+                        var oldTex = slotPortraits[i].texture;
+                        if (oldTex != null) UnityEngine.Object.Destroy(oldTex);
+                        slotPortraits[i].texture = null;
+                    }
                 }
 
                 int captured = i;
