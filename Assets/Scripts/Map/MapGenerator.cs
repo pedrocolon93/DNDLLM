@@ -48,6 +48,9 @@ namespace DNDLLM.Map
                 Destroy(child.gameObject);
             }
 
+            if (DnD.UI.ChatUI.Instance != null)
+                DnD.UI.ChatUI.Instance.AddSystemMessage("⚙  Generating map...");
+
             // 1. Generate Base Floor Texture (Once)
             string primaryKeyword = string.IsNullOrEmpty(keywords) ? "Grass" : keywords.Split(',')[0].Trim();
             Texture2D floorTexture = await LLMService.Instance.GenerateImage($"Top down 2d rpg map tile of {primaryKeyword} ground");
@@ -100,10 +103,10 @@ namespace DNDLLM.Map
             }
             Debug.Log(mapLog);
 
-            Debug.Log("Map Generation Completed");
-            if (DNDLLM.Core.GameManager.Instance != null)
-                DNDLLM.Core.GameManager.Instance.ChangeState(DNDLLM.Core.GameState.CharacterGeneration);
-            
+            if (DnD.UI.ChatUI.Instance != null)
+                DnD.UI.ChatUI.Instance.AddSystemMessage("✦  Map ready.");
+            Debug.Log("Map Generation Complete.");
+
             AdjustCamera();
         }
 
@@ -155,38 +158,27 @@ namespace DNDLLM.Map
 
         private void AdjustCamera()
         {
-            if (Camera.main == null) return;
+            // Use the dedicated MapCamera (renders to RenderTexture) instead of Camera.main
+            Camera cam = null;
+            var mapCamGO = GameObject.Find("MapCamera");
+            if (mapCamGO != null) cam = mapCamGO.GetComponent<Camera>();
+            if (cam == null) cam = Camera.main;
+            if (cam == null) return;
 
-            // 1. Center Camera
-            // Tiles are at 0, 1, 2... (width-1) * cellSize
-            // Center is (width-1) * cellSize / 2
             float centerX = (width - 1) * cellSize / 2f;
             float centerZ = (height - 1) * cellSize / 2f;
+            cam.transform.position = new Vector3(centerX, 10f, centerZ);
+            cam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            cam.orthographic = true;
 
-            Camera.main.transform.position = new Vector3(centerX, 10f, centerZ);
-            Camera.main.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-
-            // 2. Adjust Orthographic Size to fit grid
-            Camera.main.orthographic = true;
-            
             float targetHeight = height * cellSize;
-            float targetWidth = width * cellSize;
+            float targetWidth  = width  * cellSize;
+            float screenRatio  = (float)Screen.width / (float)Screen.height;
+            float targetRatio  = targetWidth / targetHeight;
 
-            float screenRatio = (float)Screen.width / (float)Screen.height;
-            float targetRatio = targetWidth / targetHeight;
-
-            if (screenRatio >= targetRatio)
-            {
-                // Screen is wider than map, fit by height
-                // Orthographic size is half of vertical size
-                Camera.main.orthographicSize = (targetHeight / 2f) + 1f; // +1 padding
-            }
-            else
-            {
-                // Screen is narrower than map, fit by width
-                float differenceInSize = targetRatio / screenRatio;
-                Camera.main.orthographicSize = (targetHeight / 2f * differenceInSize) + 1f;
-            }
+            cam.orthographicSize = screenRatio >= targetRatio
+                ? (targetHeight / 2f) + 1f
+                : (targetHeight / 2f * (targetRatio / screenRatio)) + 1f;
         }
 
 
