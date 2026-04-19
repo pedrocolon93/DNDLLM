@@ -8,6 +8,8 @@ using DnD.AI;
 using DnD.UI;
 using DnD.Combat;
 using DNDLLM.Map;
+using DnD.Data;
+using DNDLLM.Services;
 
 namespace DnD.Managers
 {
@@ -29,6 +31,14 @@ namespace DnD.Managers
         [Header("AI Configuration")]
         [SerializeField] private bool useMockLLM = true; // Set to false when using real LLM
 
+        [Header("UI — set by UISceneBuilder")]
+        [SerializeField] private DnD.UI.TitleScreen             titleScreen;
+        [SerializeField] private DnD.UI.CharacterCreationPopup  characterPopup;
+        [SerializeField] private UnityEngine.UI.Button          menuButton;
+
+        private int _currentSlotIndex = 0;
+        private string _campaignSeed = "";
+
         private DungeonMaster dungeonMaster;
         private CommandParser commandParser;
         private ILLMProvider llmProvider;
@@ -48,18 +58,44 @@ namespace DnD.Managers
             }
         }
 
+        private string _initStatus = "starting...";
+
         private async void Start()
         {
-            await InitializeSystemsAsync();
-            // Yield one frame so all MonoBehaviour Awake/Start calls complete
-            // before ChatUI.Instance is accessed
-            await System.Threading.Tasks.Task.Yield();
-            // Fallback if singleton wasn't set in time
-            var chatSearch = FindFirstObjectByType<ChatUI>(FindObjectsInactive.Include);
-            Debug.Log($"[GameManager] After yield: ChatUI.Instance={ChatUI.Instance}, FindResult={chatSearch}");
-            if (ChatUI.Instance == null && chatSearch != null)
-                ChatUI.Instance = chatSearch;
-            ChangeState(GameState.MainMenu);
+            try
+            {
+                _initStatus = "initializing systems";
+                await InitializeSystemsAsync();
+                _initStatus = "yielding frame";
+                await System.Threading.Tasks.Task.Yield();
+
+                var chatSearch = FindFirstObjectByType<ChatUI>(FindObjectsInactive.Include);
+                if (ChatUI.Instance == null && chatSearch != null)
+                    ChatUI.Instance = chatSearch;
+
+                _initStatus = ChatUI.Instance != null ? "ChatUI found" : "ChatUI MISSING";
+
+                if (ChatUI.Instance != null)
+                    ChatUI.Instance.OnPlayerInput += HandlePlayerInput;
+
+                if (menuButton != null)
+                    menuButton.onClick.AddListener(OnMenuButtonPressed);
+
+                ChangeState(GameState.MainMenu);
+                _initStatus = "ready - state: " + currentState;
+            }
+            catch (System.Exception e)
+            {
+                _initStatus = "EXCEPTION: " + e.Message;
+                Debug.LogError("[GameManager] Start exception: " + e);
+            }
+        }
+
+        private void OnGUI()
+        {
+            GUI.color = Color.yellow;
+            GUI.Label(new Rect(10, 10, 600, 40), $"[GM] {_initStatus} | state={currentState} | ChatUI={(ChatUI.Instance != null ? "OK" : "NULL")}");
+            GUI.color = Color.white;
         }
 
         private async Task InitializeSystemsAsync()
@@ -91,7 +127,7 @@ namespace DnD.Managers
             await dungeonMaster.InitializeAsync(llmProvider);
 
             // Initialize Command Parser
-            commandParser = FindObjectOfType<CommandParser>();
+            commandParser = FindFirstObjectByType<CommandParser>();
             if (commandParser == null)
             {
                 GameObject parserObj = new GameObject("CommandParser");
@@ -100,21 +136,20 @@ namespace DnD.Managers
             }
             commandParser.Initialize(llmProvider);
 
-            // Subscribe to events
-            if (ChatUI.Instance != null)
+            // Ensure player character exists (not wired in scene = create at runtime)
+            if (playerCharacter == null)
             {
-                ChatUI.Instance.OnPlayerInput += HandlePlayerInput;
+                GameObject playerObj = new GameObject("Player");
+                playerCharacter = playerObj.AddComponent<CharacterStats>();
+                DontDestroyOnLoad(playerObj);
             }
 
+            // Subscribe to non-UI events now
             if (dungeonMaster != null)
-            {
                 dungeonMaster.OnDMResponse += OnDMResponse;
-            }
 
             if (CombatManager.Instance != null)
-            {
                 CombatManager.Instance.OnCombatMessage += OnCombatMessage;
-            }
 
             Debug.Log("[GameManager] All systems initialized!");
         }
@@ -150,18 +185,197 @@ namespace DnD.Managers
 
         private void ShowMainMenu()
         {
-            Debug.Log($"[GameManager] ShowMainMenu: ChatUI.Instance={ChatUI.Instance}");
-            if (ChatUI.Instance == null) return;
-            ChatUI.Instance.AddSystemMessage("✦  WELCOME TO D&D LLM  ✦");
-            ChatUI.Instance.AddSystemMessage("An adventure powered by AI.");
-            ChatUI.Instance.AddSystemMessage("Describe the adventure you want to embark on...");
+            if (titleScreen != null)
+            {
+                titleScreen.gameObject.SetActive(true);
+                titleScreen.OnNewGame     = OnNewGameSelected;
+                titleScreen.OnSlotSelected = OnSlotSelected;
+                titleScreen.Refresh();
+            }
+            else
+            {
+                if (ChatUI.Instance == null) return;
+                ChatUI.Instance.AddSystemMessage("=== WELCOME TO D&D LLM ===");
+                ChatUI.Instance.AddSystemMessage("An adventure powered by AI.");
+                ChatUI.Instance.AddSystemMessage("Describe the adventure you want to embark on...");
+            }
         }
 
         private void StartCharacterCreation()
         {
-            if (ChatUI.Instance == null) return;
-            ChatUI.Instance.AddSystemMessage("✦  CHARACTER CREATION  ✦");
-            ChatUI.Instance.AddSystemMessage("Describe your hero — class, background, personality.");
+            if (characterPopup != null)
+            {
+                characterPopup.OnComplete  = OnCharacterCreationComplete;
+                characterPopup.OnCancelled = () => ChangeState(GameState.MainMenu);
+                characterPopup.Open(_currentSlotIndex);
+            }
+            else
+            {
+                if (ChatUI.Instance == null) return;
+                ChatUI.Instance.AddSystemMessage("=== CHARACTER CREATION ===");
+                ChatUI.Instance.AddSystemMessage("Describe your hero -- class, background, personality.");
+            }
+        }
+
+        private void OnNewGameSelected()
+        {
+            // Pick first empty slot; fall back to slot 0 if all full
+            int slot = 0;
+            for (int i = 0; i < 3; i++)
+            {
+                var (data, _) = DNDLLM.Services.SaveSystem.Load(i);
+                if (data == null) { slot = i; break; }
+                if (i == 2) slot = 0; // all full — overwrite slot 0
+            }
+            _currentSlotIndex = slot;
+
+            if (titleScreen != null) titleScreen.gameObject.SetActive(false);
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.ClearChat();
+                ChatUI.Instance.AddSystemMessage("=== NEW ADVENTURE ===");
+                ChatUI.Instance.AddSystemMessage("Describe the adventure you want to embark on...");
+            }
+            // State stays MainMenu; player types prompt → StartCampaignAsync transitions to CharacterCreation
+        }
+
+        private void OnSlotSelected(int slotIndex)
+        {
+            if (titleScreen != null) titleScreen.gameObject.SetActive(false);
+            LoadSlot(slotIndex);
+        }
+
+        private void OnMenuButtonPressed()
+        {
+            SaveCurrentSlot();
+            ChangeState(GameState.MainMenu);
+        }
+
+        private void OnCharacterCreationComplete(CharacterCreationData data)
+        {
+            if (playerCharacter == null)
+            {
+                var go = new GameObject("Player");
+                playerCharacter = go.AddComponent<DnD.Character.CharacterStats>();
+                DontDestroyOnLoad(go);
+            }
+            playerCharacter.characterName = data.characterName;
+            playerCharacter.race          = data.race;
+
+            CharacterClass charClass = CreateBasicClass(data.characterClass,
+                data.characterClass == CharacterClassName.Fighter  ? 10 :
+                data.characterClass == CharacterClassName.Wizard   ?  6 :
+                data.characterClass == CharacterClassName.Rogue    ?  8 : 8);
+
+            playerCharacter.characterClass = charClass;
+            playerCharacter.abilities = AbilityScores.GenerateRandom();
+            playerCharacter.Initialize();
+
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.AddSystemMessage($"Character created: {data.characterName}");
+                ChatUI.Instance.AddSystemMessage($"Class: {data.characterClass} | Race: {data.race}");
+                ChatUI.Instance.AddSystemMessage($"HP: {playerCharacter.maxHitPoints} | AC: {playerCharacter.armorClass}");
+                if (!string.IsNullOrEmpty(data.backstory))
+                    ChatUI.Instance.AddDMMessage(data.backstory);
+            }
+
+            SaveCurrentSlot(data.portrait);
+            ChangeState(GameState.Exploration);
+        }
+
+        private void SaveCurrentSlot(UnityEngine.Texture2D portrait = null)
+        {
+            if (playerCharacter == null) return;
+
+            var saveData = new SaveData
+            {
+                characterName         = playerCharacter.characterName,
+                raceName              = playerCharacter.race.ToString(),
+                className             = playerCharacter.characterClass != null
+                                            ? playerCharacter.characterClass.className.ToString()
+                                            : "",
+                level                 = playerCharacter.level,
+                maxHP                 = playerCharacter.maxHitPoints,
+                currentHP             = playerCharacter.currentHitPoints,
+                armorClass            = playerCharacter.armorClass,
+                str                   = playerCharacter.abilities.GetScore(AbilityScore.Strength),
+                dex                   = playerCharacter.abilities.GetScore(AbilityScore.Dexterity),
+                con                   = playerCharacter.abilities.GetScore(AbilityScore.Constitution),
+                intel                 = playerCharacter.abilities.GetScore(AbilityScore.Intelligence),
+                wis                   = playerCharacter.abilities.GetScore(AbilityScore.Wisdom),
+                cha                   = playerCharacter.abilities.GetScore(AbilityScore.Charisma),
+                campaignSeed          = _campaignSeed,
+                campaignTimeline      = currentCampaign?.timelineText ?? "",
+                gameState             = currentState.ToString(),
+                messages              = ChatUI.Instance != null
+                                            ? ChatUI.Instance.GetMessageHistory()
+                                            : new System.Collections.Generic.List<ChatMessageData>()
+            };
+            saveData.slotLabel = $"{saveData.characterName} · {saveData.className} · Lv{saveData.level}";
+            DNDLLM.Services.SaveSystem.Save(_currentSlotIndex, saveData, portrait);
+            Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel}");
+        }
+
+        private void LoadSlot(int slotIndex)
+        {
+            var (data, portrait) = DNDLLM.Services.SaveSystem.Load(slotIndex);
+            if (data == null)
+            {
+                Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
+                ChangeState(GameState.MainMenu);
+                return;
+            }
+
+            _currentSlotIndex = slotIndex;
+            _campaignSeed     = data.campaignSeed ?? "";
+
+            if (playerCharacter == null)
+            {
+                var go = new GameObject("Player");
+                playerCharacter = go.AddComponent<DnD.Character.CharacterStats>();
+                DontDestroyOnLoad(go);
+            }
+            playerCharacter.characterName    = data.characterName;
+            playerCharacter.level            = data.level;
+            playerCharacter.maxHitPoints     = data.maxHP;
+            playerCharacter.currentHitPoints = data.currentHP;
+            playerCharacter.armorClass       = data.armorClass;
+            playerCharacter.abilities = new AbilityScores(
+                data.str, data.dex, data.con, data.intel, data.wis, data.cha);
+
+            if (System.Enum.TryParse<Race>(data.raceName, out var parsedRace))
+                playerCharacter.race = parsedRace;
+
+            if (!string.IsNullOrEmpty(data.campaignTimeline))
+                currentCampaign = new StoryTimeline
+                {
+                    campaignPrompt = data.campaignSeed ?? "",
+                    timelineText   = data.campaignTimeline
+                };
+
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.ClearChat();
+                if (data.messages != null)
+                {
+                    foreach (var msg in data.messages)
+                    {
+                        switch (msg.type)
+                        {
+                            case "Player": ChatUI.Instance.AddPlayerMessage(msg.text); break;
+                            case "DM":     ChatUI.Instance.AddDMMessage(msg.text);     break;
+                            default:       ChatUI.Instance.AddSystemMessage(msg.text); break;
+                        }
+                    }
+                }
+                ChatUI.Instance.AddSystemMessage("--- Adventure resumed ---");
+            }
+
+            if (System.Enum.TryParse<GameState>(data.gameState, out var savedState))
+                ChangeState(savedState);
+            else
+                ChangeState(GameState.Exploration);
         }
 
         private void StartExploration()
@@ -171,7 +385,7 @@ namespace DnD.Managers
                 MapGenerator.Instance.GenerateMap("dungeon");
 
             if (ChatUI.Instance == null) return;
-            ChatUI.Instance.AddSystemMessage("✦  YOUR ADVENTURE BEGINS  ✦");
+            ChatUI.Instance.AddSystemMessage("=== YOUR ADVENTURE BEGINS ===");
         }
 
         private async void HandlePlayerInput(string input)
@@ -207,6 +421,7 @@ namespace DnD.Managers
 
         private async Task StartCampaignAsync(string campaignPrompt)
         {
+            _campaignSeed = campaignPrompt;
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.AddSystemMessage("Creating your campaign...");
