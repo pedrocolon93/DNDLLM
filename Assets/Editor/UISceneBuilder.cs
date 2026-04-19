@@ -207,11 +207,6 @@ public static class UISceneBuilder
         var mapCamGO = new GameObject("MapCamera");
         Undo.RegisterCreatedObjectUndo(mapCamGO, "Create MapCamera");
 
-        // Note: assigning a tag requires the tag to exist in TagManager.
-        // We use a try/catch to avoid errors if "MapCamera" tag hasn't been created yet.
-        try { mapCamGO.tag = "MapCamera"; }
-        catch (UnityException) { /* Tag not registered; lookup uses GameObject.Find("MapCamera") instead */ }
-
         var mapCam = mapCamGO.AddComponent<Camera>();
         mapCam.orthographic = true;
         mapCam.orthographicSize = 5f;
