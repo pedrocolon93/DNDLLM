@@ -1,3 +1,4 @@
+// Assets/Scripts/UI/ChatUI.cs
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -6,10 +7,6 @@ using TMPro;
 
 namespace DnD.UI
 {
-    /// <summary>
-    /// Chat-based UI for D&D game interactions
-    /// Uses TextMeshPro for text rendering and object pooling for performance
-    /// </summary>
     public class ChatUI : MonoBehaviour
     {
         public static ChatUI Instance { get; private set; }
@@ -20,28 +17,20 @@ namespace DnD.UI
         [SerializeField] private TMP_InputField inputField;
         [SerializeField] private Button sendButton;
 
-        [Header("Message Prefabs")]
-        [SerializeField] private GameObject playerMessagePrefab;
-        [SerializeField] private GameObject dmMessagePrefab;
-        [SerializeField] private GameObject systemMessagePrefab;
-
         [Header("Settings")]
         [SerializeField] private int maxMessages = 100;
         [SerializeField] private bool autoScroll = true;
         [SerializeField] private float typewriterSpeed = 0.03f;
 
-        private Queue<GameObject> messagePool = new Queue<GameObject>();
-        private List<GameObject> activeMessages = new List<GameObject>();
+        private readonly List<GameObject> activeMessages = new List<GameObject>();
         private Coroutine typewriterCoroutine;
 
         public System.Action<string> OnPlayerInput;
 
         private void Awake()
         {
-            if (Instance == null)
-                Instance = this;
-            else
-                Destroy(gameObject);
+            if (Instance == null) Instance = this;
+            else Destroy(gameObject);
         }
 
         private void Start()
@@ -50,28 +39,20 @@ namespace DnD.UI
                 sendButton.onClick.AddListener(SendMessage);
 
             if (inputField != null)
-            {
-                inputField.onSubmit.AddListener((text) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(text))
-                        SendMessage();
-                });
-            }
+                inputField.onSubmit.AddListener(_ => { if (!string.IsNullOrWhiteSpace(inputField.text)) SendMessage(); });
         }
 
-        public void AddPlayerMessage(string message)
-        {
-            AddMessage(message, MessageType.Player);
-        }
+        // ── Public API ────────────────────────────────────────────────
+
+        public void AddPlayerMessage(string message)  => AddMessage(message, MessageType.Player);
+        public void AddSystemMessage(string message)  => AddMessage(message, MessageType.System);
 
         public void AddDMMessage(string message, bool useTypewriter = false)
         {
             if (useTypewriter)
             {
-                if (typewriterCoroutine != null)
-                    StopCoroutine(typewriterCoroutine);
-
-                typewriterCoroutine = StartCoroutine(TypewriterEffect(message, MessageType.DM));
+                if (typewriterCoroutine != null) StopCoroutine(typewriterCoroutine);
+                typewriterCoroutine = StartCoroutine(TypewriterEffect(message));
             }
             else
             {
@@ -79,71 +60,147 @@ namespace DnD.UI
             }
         }
 
-        public void AddSystemMessage(string message)
+        public void AppendToDMMessage(string token)
         {
-            AddMessage(message, MessageType.System);
+            if (activeMessages.Count == 0) return;
+            var last = activeMessages[activeMessages.Count - 1];
+            var tmp = last.GetComponentInChildren<TMP_Text>();
+            if (tmp == null) return;
+            tmp.text += token;
+            if (autoScroll)
+            {
+                Canvas.ForceUpdateCanvases();
+                scrollRect.verticalNormalizedPosition = 0f;
+            }
         }
+
+        public void ClearChat()
+        {
+            foreach (var msg in activeMessages)
+                if (msg != null) Destroy(msg);
+            activeMessages.Clear();
+        }
+
+        // ── Internal ──────────────────────────────────────────────────
 
         private void AddMessage(string text, MessageType type)
         {
-            GameObject messagePrefab = GetPrefabForType(type);
-            if (messagePrefab == null)
-            {
-                Debug.LogError($"No prefab set for message type: {type}");
-                return;
-            }
+            if (contentPanel == null) { Debug.LogError("[ChatUI] contentPanel is null"); return; }
 
-            GameObject messageObj = Instantiate(messagePrefab, contentPanel);
-            TMP_Text textComponent = messageObj.GetComponentInChildren<TMP_Text>();
-
-            if (textComponent != null)
-            {
-                textComponent.text = text;
-            }
-
-            activeMessages.Add(messageObj);
-
-            // Limit message history
-            if (activeMessages.Count > maxMessages)
-            {
-                GameObject oldestMessage = activeMessages[0];
-                activeMessages.RemoveAt(0);
-                Destroy(oldestMessage);
-            }
-
-            if (autoScroll)
-            {
-                StartCoroutine(ScrollToBottom());
-            }
+            GameObject msgGO = BuildMessageGO(text, type);
+            activeMessages.Add(msgGO);
+            TrimHistory();
+            if (autoScroll) StartCoroutine(ScrollToBottom());
         }
 
-        private IEnumerator TypewriterEffect(string fullText, MessageType type)
+        private GameObject BuildMessageGO(string text, MessageType type)
         {
-            GameObject messagePrefab = GetPrefabForType(type);
-            GameObject messageObj = Instantiate(messagePrefab, contentPanel);
-            TMP_Text textComponent = messageObj.GetComponentInChildren<TMP_Text>();
+            var msgGO = new GameObject($"Msg_{type}");
+            msgGO.transform.SetParent(contentPanel, false);
 
-            if (textComponent != null)
+            // Size fitter so the bubble grows with text
+            var csf = msgGO.AddComponent<ContentSizeFitter>();
+            csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var le = msgGO.AddComponent<LayoutElement>();
+            le.minHeight = 24;
+
+            // Bubble background
+            var bg = msgGO.AddComponent<Image>();
+
+            // Text child fills the bubble with padding
+            var textGO = new GameObject("Text");
+            textGO.transform.SetParent(msgGO.transform, false);
+            var textRT = textGO.AddComponent<RectTransform>();
+            textRT.anchorMin = Vector2.zero;
+            textRT.anchorMax = Vector2.one;
+            textRT.offsetMin = new Vector2(10, 6);
+            textRT.offsetMax = new Vector2(-10, -6);
+
+            var tmp = textGO.AddComponent<TextMeshProUGUI>();
+            tmp.enableWordWrapping = true;
+            tmp.text = text;
+
+            switch (type)
             {
-                textComponent.text = "";
-                activeMessages.Add(messageObj);
+                case MessageType.DM:
+                    bg.color = UITheme.BackgroundDM;
+                    tmp.color = UITheme.DmText;
+                    tmp.fontSize = UITheme.FontDM;
+                    tmp.fontStyle = FontStyles.Italic;
+                    tmp.alignment = TextAlignmentOptions.TopLeft;
+                    break;
 
-                foreach (char c in fullText)
-                {
-                    textComponent.text += c;
-                    yield return new WaitForSeconds(typewriterSpeed);
+                case MessageType.Player:
+                    bg.color = UITheme.BackgroundPlayer;
+                    tmp.color = UITheme.PlayerText;
+                    tmp.fontSize = UITheme.FontPlayer;
+                    tmp.alignment = TextAlignmentOptions.TopRight;
+                    break;
 
-                    if (autoScroll)
-                        Canvas.ForceUpdateCanvases();
-                }
+                case MessageType.System:
+                    bg.color = Color.clear;
+                    tmp.color = UITheme.SystemText;
+                    tmp.fontSize = UITheme.FontSystem;
+                    tmp.fontStyle = FontStyles.Italic;
+                    tmp.alignment = TextAlignmentOptions.Center;
+                    break;
+            }
 
+            return msgGO;
+        }
+
+        private IEnumerator TypewriterEffect(string fullText)
+        {
+            var msgGO = new GameObject("Msg_DM");
+            msgGO.transform.SetParent(contentPanel, false);
+            var csf = msgGO.AddComponent<ContentSizeFitter>();
+            csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var le = msgGO.AddComponent<LayoutElement>();
+            le.minHeight = 24;
+            var bg = msgGO.AddComponent<Image>();
+            bg.color = UITheme.BackgroundDM;
+
+            var textGO = new GameObject("Text");
+            textGO.transform.SetParent(msgGO.transform, false);
+            var textRT = textGO.AddComponent<RectTransform>();
+            textRT.anchorMin = Vector2.zero;
+            textRT.anchorMax = Vector2.one;
+            textRT.offsetMin = new Vector2(10, 6);
+            textRT.offsetMax = new Vector2(-10, -6);
+
+            var tmp = textGO.AddComponent<TextMeshProUGUI>();
+            tmp.enableWordWrapping = true;
+            tmp.color = UITheme.DmText;
+            tmp.fontSize = UITheme.FontDM;
+            tmp.fontStyle = FontStyles.Italic;
+            tmp.alignment = TextAlignmentOptions.TopLeft;
+            tmp.text = "";
+
+            activeMessages.Add(msgGO);
+            TrimHistory();
+
+            foreach (char c in fullText)
+            {
+                tmp.text += c;
+                yield return new WaitForSeconds(typewriterSpeed);
                 if (autoScroll)
                 {
-                    yield return ScrollToBottom();
+                    Canvas.ForceUpdateCanvases();
+                    scrollRect.verticalNormalizedPosition = 0f;
                 }
             }
 
+            yield return ScrollToBottom();
             typewriterCoroutine = null;
+        }
+
+        private void TrimHistory()
+        {
+            while (activeMessages.Count > maxMessages)
+            {
+                if (activeMessages[0] != null) Destroy(activeMessages[0]);
+                activeMessages.RemoveAt(0);
+            }
         }
 
         private IEnumerator ScrollToBottom()
@@ -155,70 +212,14 @@ namespace DnD.UI
 
         private void SendMessage()
         {
-            if (inputField == null || string.IsNullOrWhiteSpace(inputField.text))
-                return;
-
+            if (inputField == null || string.IsNullOrWhiteSpace(inputField.text)) return;
             string message = inputField.text;
             inputField.text = "";
             inputField.ActivateInputField();
-
-            // Display player message
             AddPlayerMessage(message);
-
-            // Notify listeners (GameManager, CommandParser, etc.)
             OnPlayerInput?.Invoke(message);
         }
 
-        private GameObject GetPrefabForType(MessageType type)
-        {
-            switch (type)
-            {
-                case MessageType.Player:
-                    return playerMessagePrefab;
-                case MessageType.DM:
-                    return dmMessagePrefab;
-                case MessageType.System:
-                    return systemMessagePrefab;
-                default:
-                    return dmMessagePrefab;
-            }
-        }
-
-        public void ClearChat()
-        {
-            foreach (var message in activeMessages)
-            {
-                if (message != null)
-                    Destroy(message);
-            }
-            activeMessages.Clear();
-        }
-
-        public void AppendToDMMessage(string token)
-        {
-            // For streaming responses - append to the last DM message
-            if (activeMessages.Count > 0)
-            {
-                GameObject lastMessage = activeMessages[activeMessages.Count - 1];
-                TMP_Text textComponent = lastMessage.GetComponentInChildren<TMP_Text>();
-                if (textComponent != null)
-                {
-                    textComponent.text += token;
-
-                    if (autoScroll)
-                    {
-                        Canvas.ForceUpdateCanvases();
-                        scrollRect.verticalNormalizedPosition = 0f;
-                    }
-                }
-            }
-        }
-
-        public enum MessageType
-        {
-            Player,
-            DM,
-            System
-        }
+        public enum MessageType { Player, DM, System }
     }
 }
