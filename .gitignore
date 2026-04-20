@@ -4,8 +4,16 @@
 #
 .utmp/
 
-# Claude Code worktrees
-/.claude/worktrees/
+# Claude Code — worktrees and per-project memory/state
+/.claude/
+
+# Superpowers plugin cache and state
+/.superpowers/
+
+# Main scene is fully rebuilt by DnD/Setup Scene (All Steps) — never commit it
+# (also keeps API keys out of version control)
+Assets/masterscene.unity
+Assets/masterscene.unity.meta
 
 # Unity package binaries (large executables shipped with packages)
 **/RelayApp~/

@@ -36,6 +36,12 @@ namespace DnD.Data
 
         // Full conversation history
         public List<ChatMessageData> messages = new List<ChatMessageData>();
+
+        // Map tile descriptions (one per unique tile type)
+        public List<TileDescriptionEntry> tileDescriptions = new List<TileDescriptionEntry>();
+
+        // Full per-tile grid state (captures EditMapPanel changes and map graph edits)
+        public List<TileGridEntry> tileGrid = new List<TileGridEntry>();
     }
 
     [Serializable]
@@ -43,6 +49,22 @@ namespace DnD.Data
     {
         public string type;   // "Player" | "DM" | "System"
         public string text;
+    }
+
+    [Serializable]
+    public class TileDescriptionEntry
+    {
+        public string tileType;    // TileType.ToString()
+        public string description;
+    }
+
+    /// <summary>Per-tile state saved for the current active map (captures EditMapPanel changes).</summary>
+    [Serializable]
+    public class TileGridEntry
+    {
+        public int    x, y;
+        public string tileType;    // TileType.ToString()
+        public string description;
     }
 
     // Passed from CharacterCreationPopup to GameManager on completion
@@ -53,6 +75,8 @@ namespace DnD.Data
         public CharacterClassName characterClass;
         public string             appearanceDescription;
         public string             backstory;
+        /// <summary>Player-allocated ability scores from the creation wizard. Null = use GenerateRandom fallback.</summary>
+        public DnD.Character.AbilityScores abilities;
         // Not serialized via JsonUtility — SaveSystem writes/reads this as slot_N_portrait.png
         public Texture2D          portrait;  // null if generation timed out
     }

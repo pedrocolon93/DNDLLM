@@ -157,7 +157,7 @@ namespace DnD.UI
             textGO.AddComponent<RectTransform>();
 
             var tmp = textGO.AddComponent<TextMeshProUGUI>();
-            tmp.enableWordWrapping = true;
+            tmp.textWrappingMode = TMPro.TextWrappingModes.Normal;
             tmp.text = text;
 
             switch (type)
@@ -213,7 +213,7 @@ namespace DnD.UI
             textGO.AddComponent<RectTransform>();
 
             var tmp = textGO.AddComponent<TextMeshProUGUI>();
-            tmp.enableWordWrapping = true;
+            tmp.textWrappingMode = TMPro.TextWrappingModes.Normal;
             tmp.color = UITheme.DmText;
             tmp.fontSize = UITheme.FontDM;
             tmp.fontStyle = FontStyles.Italic;

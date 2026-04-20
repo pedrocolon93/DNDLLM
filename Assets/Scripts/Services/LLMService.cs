@@ -307,6 +307,16 @@ namespace DNDLLM.Services
         /// </summary>
         public async Task<Texture2D> GenerateStyledTile(string tilePrompt, Texture2D styleAnchor)
         {
+            if (useCache)
+            {
+                Texture2D cachedTex = ImageCache.Load(tilePrompt);
+                if (cachedTex != null)
+                {
+                    Debug.Log($"[LLMService] StyledTile loaded from cache.");
+                    return cachedTex;
+                }
+            }
+
             if (useMock)
             {
                 await Task.Delay(100);
@@ -374,8 +384,14 @@ namespace DNDLLM.Services
                     {
                         var msg = responseData.choices[0].message;
                         if (msg.images != null && msg.images.Count > 0)
-                            return ParseBase64Image(msg.images[0].image_url.url);
-                        return ParseBase64Image(msg.content);
+                        {
+                            Texture2D tex = ParseBase64Image(msg.images[0].image_url.url);
+                            if (tex != null && useCache) ImageCache.Save(tilePrompt, tex);
+                            return tex;
+                        }
+                        Texture2D fallback = ParseBase64Image(msg.content);
+                        if (fallback != null && useCache) ImageCache.Save(tilePrompt, fallback);
+                        return fallback;
                     }
                 }
                 else

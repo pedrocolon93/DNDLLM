@@ -39,8 +39,9 @@ namespace DNDLLM.Story
             Debug.Log($"Story Intro: {storyIntro}");
 
             // 2. Extract Keywords for Map
-            string mapPrompt = "Based on the following story, list 3 keywords describing the environment (e.g., Forest, Cave, Desert). Return only the keywords separated by commas.";
-            string keywords = await LLMService.Instance.SendPrompt("You are a map generator helper.", storyIntro);
+            string keywords = await LLMService.Instance.SendPrompt(
+                "You are a map generator helper.",
+                "Based on the following story, list 3 keywords describing the environment (e.g., Forest, Cave, Desert). Return only the keywords separated by commas.\n\n" + storyIntro);
             
             Debug.Log($"Map Keywords: {keywords}");
 
