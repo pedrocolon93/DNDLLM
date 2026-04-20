@@ -11,9 +11,11 @@ namespace DNDLLM.Map
     {
         public static MapGenerator Instance { get; private set; }
 
+        public event System.Action OnMapReady;
+
         [Header("Map Settings")]
-        public int width  = 5;
-        public int height = 5;
+        public int width  = 7;
+        public int height = 7;
         public float cellSize = 1.0f;
 
         [System.Serializable]
@@ -118,6 +120,7 @@ namespace DNDLLM.Map
             if (DnD.UI.ChatUI.Instance != null)
                 DnD.UI.ChatUI.Instance.AddSystemMessage("Map ready.");
 
+            OnMapReady?.Invoke();
             Debug.Log("[MapGenerator] Generation complete.");
             AdjustCamera();
         }
@@ -259,12 +262,15 @@ namespace DNDLLM.Map
 
             float targetHeight = height * cellSize;
             float targetWidth  = width  * cellSize;
-            float screenRatio  = (float)Screen.width / (float)Screen.height;
-            float targetRatio  = targetWidth / targetHeight;
 
-            cam.orthographicSize = screenRatio >= targetRatio
+            float rtAspect = (cam.targetTexture != null)
+                ? (float)cam.targetTexture.width / cam.targetTexture.height
+                : cam.aspect;
+
+            float targetRatio = targetWidth / targetHeight;
+            cam.orthographicSize = rtAspect >= targetRatio
                 ? (targetHeight / 2f) + 1f
-                : (targetHeight / 2f * (targetRatio / screenRatio)) + 1f;
+                : (targetHeight / 2f * (targetRatio / rtAspect)) + 1f;
         }
 
         private void LogLayout()

@@ -35,6 +35,7 @@ namespace DnD.Managers
         [SerializeField] private DnD.UI.TitleScreen             titleScreen;
         [SerializeField] private DnD.UI.CharacterCreationPopup  characterPopup;
         [SerializeField] private UnityEngine.UI.Button          menuButton;
+        [SerializeField] private UnityEngine.UI.Button          saveButton;
 
         private int _currentSlotIndex = 0;
         private string _campaignSeed = "";
@@ -80,6 +81,9 @@ namespace DnD.Managers
 
                 if (menuButton != null)
                     menuButton.onClick.AddListener(OnMenuButtonPressed);
+
+                if (saveButton != null)
+                    saveButton.onClick.AddListener(OnSaveButtonPressed);
 
                 ChangeState(GameState.MainMenu);
                 _initStatus = "ready - state: " + currentState;
@@ -196,6 +200,7 @@ namespace DnD.Managers
                 titleScreen.gameObject.SetActive(true);
                 titleScreen.OnNewGame     = OnNewGameSelected;
                 titleScreen.OnSlotSelected = OnSlotSelected;
+                titleScreen.OnSlotDelete   = OnSlotDeleted;
                 titleScreen.Refresh();
             }
             else
@@ -250,6 +255,12 @@ namespace DnD.Managers
             LoadSlot(slotIndex);
         }
 
+        private void OnSlotDeleted(int slotIndex)
+        {
+            DNDLLM.Services.SaveSystem.Delete(slotIndex);
+            titleScreen.Refresh();
+        }
+
         private void OnMenuButtonPressed()
         {
             // Only save if we're in an active game — not during menus or character creation
@@ -258,6 +269,18 @@ namespace DnD.Managers
                 currentState == GameState.Dialogue)
                 SaveCurrentSlot();
             ChangeState(GameState.MainMenu);
+        }
+
+        private void OnSaveButtonPressed()
+        {
+            if (currentState == GameState.Exploration ||
+                currentState == GameState.Combat      ||
+                currentState == GameState.Dialogue)
+            {
+                SaveCurrentSlot();
+                if (ChatUI.Instance != null)
+                    ChatUI.Instance.AddSystemMessage("Game saved.");
+            }
         }
 
         private void OnCharacterCreationComplete(CharacterCreationData data)
@@ -400,14 +423,30 @@ namespace DnD.Managers
 
         private void StartExploration()
         {
-            if (MapGenerator.Instance != null)
-                MapGenerator.Instance.GenerateMap("dungeon");
-
-            if (ChatUI.Instance == null) return;
-            // Don't add "ADVENTURE BEGINS" when we're resuming a loaded save
-            if (!_isResumingLoad)
+            if (!_isResumingLoad && ChatUI.Instance != null)
                 ChatUI.Instance.AddSystemMessage("=== YOUR ADVENTURE BEGINS ===");
             _isResumingLoad = false;
+
+            if (MapGenerator.Instance != null)
+            {
+                MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
+                MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
+                MapGenerator.Instance.GenerateMap(
+                    _campaignSeed.Length > 0 ? _campaignSeed : "dungeon");
+            }
+        }
+
+        private async void OnMapReadyNarrate()
+        {
+            MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
+            if (ChatUI.Instance == null) return;
+            string seed = string.IsNullOrEmpty(_campaignSeed) ? "a mysterious dungeon" : _campaignSeed;
+            string prompt = $"You are the Dungeon Master. The player has just entered: {seed}. "
+                          + "Describe the scene in 2-3 evocative sentences. Set the mood.";
+            ChatUI.Instance.AddSystemMessage("The Dungeon Master speaks...");
+            string narration = await dungeonMaster.NarrateActionAsync("", prompt);
+            if (!string.IsNullOrEmpty(narration))
+                ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
         }
 
         private async void HandlePlayerInput(string input)
@@ -445,17 +484,25 @@ namespace DnD.Managers
         {
             _campaignSeed = campaignPrompt;
             if (ChatUI.Instance != null)
-            {
                 ChatUI.Instance.AddSystemMessage("Creating your campaign...");
-            }
 
             currentCampaign = await dungeonMaster.GenerateCampaignAsync(campaignPrompt, 1);
 
             if (currentCampaign != null && ChatUI.Instance != null)
-            {
                 ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
-                ChangeState(GameState.CharacterCreation);
+            else
+            {
+                // LLM failed — create a minimal campaign so the game can still proceed
+                currentCampaign = new StoryTimeline
+                {
+                    campaignPrompt = campaignPrompt,
+                    timelineText   = "The Dungeon Master considers your actions..."
+                };
+                if (ChatUI.Instance != null)
+                    ChatUI.Instance.AddDMMessage(currentCampaign.timelineText);
             }
+
+            ChangeState(GameState.CharacterCreation);
         }
 
         private async Task HandleCharacterCreationInput(string input)
