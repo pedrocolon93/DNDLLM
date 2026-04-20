@@ -1419,7 +1419,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5f1c7b81d0df56b48a4adfaedcbc0961, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DNDLLM.Services.LLMService
-  apiKey: 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
+  apiKey: sk-or-v1-YOUR_KEY_HERE
   useMock: 0
   model: qwen/qwen3-235b-a22b-2507
   imageModel: google/gemini-2.5-flash-image
