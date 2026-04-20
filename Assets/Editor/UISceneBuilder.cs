@@ -308,6 +308,12 @@ public static class UISceneBuilder
             Debug.Log("[UISceneBuilder] GameManager already present on GameSystem.");
         }
 
+        if (gameSystemGO.GetComponent<DNDLLM.Services.TTSService>() == null)
+        {
+            Undo.AddComponent<DNDLLM.Services.TTSService>(gameSystemGO);
+            Debug.Log("[UISceneBuilder] TTSService added to GameSystem.");
+        }
+
         EditorSceneManager.MarkSceneDirty(scene);
     }
 
