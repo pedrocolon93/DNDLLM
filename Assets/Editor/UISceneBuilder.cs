@@ -216,7 +216,30 @@ public static class UISceneBuilder
         mapCam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
         mapCamGO.AddComponent<MapCameraController>();
 
-        // ── Menu button (top-right, floats above split) ───────────────────
+        // ── HUD buttons (top-right, float above split) ────────────────────
+        // SAVE button
+        var saveBtnGO = MakeGO("SaveButton", canvasGO.transform);
+        var saveBtnRT = saveBtnGO.GetComponent<RectTransform>();
+        saveBtnRT.anchorMin  = new Vector2(1f, 1f);
+        saveBtnRT.anchorMax  = new Vector2(1f, 1f);
+        saveBtnRT.pivot      = new Vector2(1f, 1f);
+        saveBtnRT.anchoredPosition = new Vector2(-80f, -8f);
+        saveBtnRT.sizeDelta  = new Vector2(64f, 28f);
+        var saveBtnImg = saveBtnGO.AddComponent<Image>();
+        saveBtnImg.color = new Color32(0x12, 0x0C, 0x03, 0xCC);
+        var saveBtn = saveBtnGO.AddComponent<Button>();
+        saveBtn.targetGraphic = saveBtnImg;
+        var saveBtnTextGO = MakeGO("Text", saveBtnGO.transform);
+        var saveBtnTextRT  = saveBtnTextGO.GetComponent<RectTransform>();
+        saveBtnTextRT.anchorMin = Vector2.zero; saveBtnTextRT.anchorMax = Vector2.one;
+        saveBtnTextRT.offsetMin = Vector2.zero; saveBtnTextRT.offsetMax = Vector2.zero;
+        var saveBtnTMP = saveBtnTextGO.AddComponent<TextMeshProUGUI>();
+        saveBtnTMP.text      = "SAVE";
+        saveBtnTMP.fontSize  = 11f;
+        saveBtnTMP.color     = UITheme.GoldAccent;
+        saveBtnTMP.alignment = TextAlignmentOptions.Center;
+
+        // Menu/Load button
         var menuBtnGO = MakeGO("MenuButton", canvasGO.transform);
         var menuBtnRT = menuBtnGO.GetComponent<RectTransform>();
         menuBtnRT.anchorMin  = new Vector2(1f, 1f);
@@ -233,12 +256,12 @@ public static class UISceneBuilder
         menuBtnTextRT.anchorMin = Vector2.zero; menuBtnTextRT.anchorMax = Vector2.one;
         menuBtnTextRT.offsetMin = Vector2.zero; menuBtnTextRT.offsetMax = Vector2.zero;
         var menuBtnTMP = menuBtnTextGO.AddComponent<TextMeshProUGUI>();
-        menuBtnTMP.text      = "MENU";
+        menuBtnTMP.text      = "LOAD";
         menuBtnTMP.fontSize  = 11f;
         menuBtnTMP.color     = UITheme.GoldAccent;
         menuBtnTMP.alignment = TextAlignmentOptions.Center;
 
-        // Wire menuButton to GameManager if present
+        // Wire menuButton and saveButton to GameManager if present
         var gameSystemGO = GameObject.Find("GameSystem");
         if (gameSystemGO != null)
         {
@@ -247,6 +270,7 @@ public static class UISceneBuilder
             {
                 var gmSO = new SerializedObject(gm);
                 gmSO.FindProperty("menuButton").objectReferenceValue = menuBtn;
+                gmSO.FindProperty("saveButton").objectReferenceValue = saveBtn;
                 gmSO.ApplyModifiedProperties();
             }
         }
@@ -385,6 +409,7 @@ public static class UISceneBuilder
         var slotSubTexts      = new TMP_Text[3];
         var slotCampaignTexts = new TMP_Text[3];
         var slotDateTexts     = new TMP_Text[3];
+        var deleteButtons     = new Button[3];
 
         for (int i = 0; i < 3; i++)
         {
@@ -441,6 +466,31 @@ public static class UISceneBuilder
             chevTMP.color     = UITheme.GoldAccent;
             chevTMP.alignment = TextAlignmentOptions.MidlineRight;
 
+            // Delete button — small red "X" on the right
+            var delGO = MakeGO("DeleteButton", rowGO.transform);
+            var delLE = delGO.AddComponent<LayoutElement>();
+            delLE.preferredWidth  = 24f;
+            delLE.preferredHeight = 24f;
+            delLE.flexibleHeight  = 0f;
+            var delImg = delGO.AddComponent<Image>();
+            delImg.color = new Color32(0x8B, 0x00, 0x00, 0xCC);
+            var delBtn = delGO.AddComponent<Button>();
+            delBtn.targetGraphic = delImg;
+            var delColors = delBtn.colors;
+            delColors.highlightedColor = new Color32(0xCC, 0x00, 0x00, 0xFF);
+            delColors.pressedColor     = new Color32(0x55, 0x00, 0x00, 0xFF);
+            delBtn.colors = delColors;
+            var delTextGO = MakeGO("Text", delGO.transform);
+            var delTextRT = delTextGO.GetComponent<RectTransform>();
+            delTextRT.anchorMin = Vector2.zero; delTextRT.anchorMax = Vector2.one;
+            delTextRT.offsetMin = Vector2.zero; delTextRT.offsetMax = Vector2.zero;
+            var delTMP = delTextGO.AddComponent<TextMeshProUGUI>();
+            delTMP.text      = "✕";
+            delTMP.fontSize  = 12f;
+            delTMP.color     = Color.white;
+            delTMP.alignment = TextAlignmentOptions.Center;
+            deleteButtons[i] = delBtn;
+
             slotButtons[i] = rowBtn;
         }
 
@@ -453,6 +503,7 @@ public static class UISceneBuilder
         SetArrayProp(so, "slotSubTexts",      slotSubTexts);
         SetArrayProp(so, "slotCampaignTexts", slotCampaignTexts);
         SetArrayProp(so, "slotDateTexts",     slotDateTexts);
+        SetArrayProp(so, "deleteButtons",     deleteButtons);
         so.ApplyModifiedProperties();
 
         // Wire to GameManager if present

@@ -22,9 +22,13 @@ namespace DnD.UI
         [SerializeField] private TMP_Text[] slotCampaignTexts; // "The Sunken Crypts…"
         [SerializeField] private TMP_Text[] slotDateTexts;     // "2 days ago"
 
+        [Header("Delete Buttons (one per slot)")]
+        [SerializeField] private Button[] deleteButtons;
+
         // ── Events ────────────────────────────────────────────────────────
         public Action<int> OnSlotSelected;  // loaded slot index (assigned by GameManager, not subscribed)
         public Action      OnNewGame;
+        public Action<int> OnSlotDelete;
 
         private void OnEnable() => Refresh();
 
@@ -103,6 +107,13 @@ namespace DnD.UI
                 int captured = i;
                 slotButtons[i].onClick.RemoveAllListeners();
                 slotButtons[i].onClick.AddListener(() => OnSlotSelected?.Invoke(captured));
+
+                if (deleteButtons != null && i < deleteButtons.Length && deleteButtons[i] != null)
+                {
+                    deleteButtons[i].gameObject.SetActive(populated);
+                    deleteButtons[i].onClick.RemoveAllListeners();
+                    deleteButtons[i].onClick.AddListener(() => OnSlotDelete?.Invoke(captured));
+                }
             }
         }
 
