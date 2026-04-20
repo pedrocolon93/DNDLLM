@@ -276,6 +276,101 @@ namespace DNDLLM.Services
             return null;
         }
 
+        /// <summary>
+        /// Generates a tile image using Gemini multimodal: sends the style anchor image as a
+        /// reference so all tiles share the same art style. No disk caching — every tile is unique.
+        /// </summary>
+        public async Task<Texture2D> GenerateStyledTile(string tilePrompt, Texture2D styleAnchor)
+        {
+            if (useMock)
+            {
+                await Task.Delay(100);
+                Texture2D tex = new Texture2D(64, 64);
+                Color col = new Color(0.55f, 0.5f, 0.45f); // floor default
+                if (tilePrompt.Contains("wall"))    col = new Color(0.35f, 0.3f, 0.25f);
+                if (tilePrompt.Contains("door"))    col = new Color(0.55f, 0.38f, 0.18f);
+                if (tilePrompt.Contains("chest"))   col = new Color(0.75f, 0.65f, 0.1f);
+                if (tilePrompt.Contains("monster") || tilePrompt.Contains("lair")) col = new Color(0.5f, 0.1f, 0.1f);
+                if (tilePrompt.Contains("portal")  || tilePrompt.Contains("exit")) col = new Color(0.25f, 0.1f, 0.75f);
+                Color[] pixels = new Color[64 * 64];
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = col;
+                tex.SetPixels(pixels);
+                tex.Apply();
+                return tex;
+            }
+
+            if (!this.imageModel.ToLower().StartsWith("google/"))
+                return await GenerateImage(tilePrompt);
+
+            // Build multimodal content array: [image_url part, text part]
+            string escapedPrompt = EscapeJson(tilePrompt);
+            string contentArray;
+
+            if (styleAnchor != null)
+            {
+                byte[] pngBytes = styleAnchor.EncodeToPNG();
+                string base64 = System.Convert.ToBase64String(pngBytes);
+                // base64 alphabet is URL-safe; no JSON escaping needed for the data
+                contentArray = "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,"
+                             + base64
+                             + "\"}},{\"type\":\"text\",\"text\":\""
+                             + escapedPrompt + "\"}]";
+            }
+            else
+            {
+                contentArray = "[{\"type\":\"text\",\"text\":\"" + escapedPrompt + "\"}]";
+            }
+
+            string requestJson = "{\"model\":\"" + EscapeJson(this.imageModel)
+                               + "\",\"messages\":[{\"role\":\"user\",\"content\":"
+                               + contentArray
+                               + "}],\"modalities\":[\"image\",\"text\"]}";
+
+            string chatUrl = "https://openrouter.ai/api/v1/chat/completions";
+            using (var request = new UnityEngine.Networking.UnityWebRequest(chatUrl, "POST"))
+            {
+                byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(requestJson);
+                request.uploadHandler   = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
+                request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type",  "application/json");
+                request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
+                request.SetRequestHeader("HTTP-Referer",  "https://github.com/google-deepmind/antigravity");
+                request.SetRequestHeader("X-Title",       "DNDLLM");
+
+                var op = request.SendWebRequest();
+                while (!op.isDone) await Task.Yield();
+
+                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    string raw = request.downloadHandler.text;
+                    Debug.Log($"[LLMService] StyledTile response (first 300 chars): {raw.Substring(0, Mathf.Min(300, raw.Length))}");
+                    var responseData = JsonUtility.FromJson<OpenRouterResponse>(raw);
+                    if (responseData?.choices?.Count > 0)
+                    {
+                        var msg = responseData.choices[0].message;
+                        if (msg.images != null && msg.images.Count > 0)
+                            return ParseBase64Image(msg.images[0].image_url.url);
+                        return ParseBase64Image(msg.content);
+                    }
+                }
+                else
+                {
+                    Debug.LogError($"[LLMService] StyledTile error: {request.error} — {request.downloadHandler.text}");
+                }
+            }
+            return null;
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\")
+                    .Replace("\"",  "\\\"")
+                    .Replace("\n",  "\\n")
+                    .Replace("\r",  "\\r")
+                    .Replace("\t",  "\\t");
+        }
+
         private Texture2D ParseBase64Image(string content)
         {
             // Regex to find data:image/png;base64,....
