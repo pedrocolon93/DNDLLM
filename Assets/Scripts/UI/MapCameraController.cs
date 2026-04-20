@@ -25,7 +25,7 @@ namespace DnD.UI
             mapCamera.targetTexture = renderTexture;
 
             // Find the RawImage in the scene named "MapDisplay" and assign texture
-            var rawImages = FindObjectsOfType<RawImage>();
+            var rawImages = FindObjectsByType<RawImage>(FindObjectsInactive.Include);
             foreach (var ri in rawImages)
             {
                 if (ri.gameObject.name == "MapDisplay")

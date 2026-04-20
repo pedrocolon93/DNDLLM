@@ -6,6 +6,7 @@ using UnityEngine.UI;
 using TMPro;
 using DnD.UI;
 using DnD.Managers;
+using DNDLLM.Map;
 
 public static class UISceneBuilder
 {
@@ -155,7 +156,7 @@ public static class UISceneBuilder
         phTMP.color = UITheme.PlaceholderText;
         phTMP.fontSize = UITheme.FontInput;
         phTMP.fontStyle = FontStyles.Italic;
-        phTMP.enableWordWrapping = false;
+        phTMP.textWrappingMode = TMPro.TextWrappingModes.NoWrap;
         inputField.placeholder = phTMP;
 
         // Text
@@ -166,7 +167,7 @@ public static class UISceneBuilder
         var inputTMP = inputTextGO.AddComponent<TextMeshProUGUI>();
         inputTMP.color = UITheme.InputText;
         inputTMP.fontSize = UITheme.FontInput;
-        inputTMP.enableWordWrapping = false;
+        inputTMP.textWrappingMode = TMPro.TextWrappingModes.NoWrap;
         inputField.textComponent = inputTMP;
 
         // Send button
@@ -216,52 +217,42 @@ public static class UISceneBuilder
         mapCam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
         mapCamGO.AddComponent<MapCameraController>();
 
-        // ── HUD buttons (top-right, float above split) ────────────────────
-        // SAVE button
-        var saveBtnGO = MakeGO("SaveButton", canvasGO.transform);
-        var saveBtnRT = saveBtnGO.GetComponent<RectTransform>();
-        saveBtnRT.anchorMin  = new Vector2(1f, 1f);
-        saveBtnRT.anchorMax  = new Vector2(1f, 1f);
-        saveBtnRT.pivot      = new Vector2(1f, 1f);
-        saveBtnRT.anchoredPosition = new Vector2(-80f, -8f);
-        saveBtnRT.sizeDelta  = new Vector2(64f, 28f);
-        var saveBtnImg = saveBtnGO.AddComponent<Image>();
-        saveBtnImg.color = new Color32(0x12, 0x0C, 0x03, 0xCC);
-        var saveBtn = saveBtnGO.AddComponent<Button>();
-        saveBtn.targetGraphic = saveBtnImg;
-        var saveBtnTextGO = MakeGO("Text", saveBtnGO.transform);
-        var saveBtnTextRT  = saveBtnTextGO.GetComponent<RectTransform>();
-        saveBtnTextRT.anchorMin = Vector2.zero; saveBtnTextRT.anchorMax = Vector2.one;
-        saveBtnTextRT.offsetMin = Vector2.zero; saveBtnTextRT.offsetMax = Vector2.zero;
-        var saveBtnTMP = saveBtnTextGO.AddComponent<TextMeshProUGUI>();
-        saveBtnTMP.text      = "SAVE";
-        saveBtnTMP.fontSize  = 11f;
-        saveBtnTMP.color     = UITheme.GoldAccent;
-        saveBtnTMP.alignment = TextAlignmentOptions.Center;
+        // ── HUD: three top-right buttons — CHARACTER | EDIT MAP | ≡ MENU ────────
+        // Helper: makes one 90×32 HUD button anchored to top-right
+        Button MakeHudButton(string goName, string label, float rightOffset)
+        {
+            var go = MakeGO(goName, canvasGO.transform);
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin        = new Vector2(1f, 1f);
+            rt.anchorMax        = new Vector2(1f, 1f);
+            rt.pivot            = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(rightOffset, -8f);
+            rt.sizeDelta        = new Vector2(90f, 32f);
+            var img = go.AddComponent<Image>();
+            img.color = new Color32(0x12, 0x0C, 0x03, 0xCC);
+            var btn = go.AddComponent<Button>();
+            btn.targetGraphic = img;
+            var c = btn.colors;
+            c.highlightedColor = new Color32(0x28, 0x1E, 0x10, 0xCC);
+            btn.colors = c;
+            var txtGO = MakeGO("Text", go.transform);
+            var txtRT = txtGO.GetComponent<RectTransform>();
+            txtRT.anchorMin = Vector2.zero; txtRT.anchorMax = Vector2.one;
+            txtRT.offsetMin = Vector2.zero; txtRT.offsetMax = Vector2.zero;
+            var tmp = txtGO.AddComponent<TextMeshProUGUI>();
+            tmp.text = label; tmp.fontSize = 11f;
+            tmp.color = UITheme.GoldAccent;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.characterSpacing = 0.5f;
+            return btn;
+        }
 
-        // Menu/Load button
-        var menuBtnGO = MakeGO("MenuButton", canvasGO.transform);
-        var menuBtnRT = menuBtnGO.GetComponent<RectTransform>();
-        menuBtnRT.anchorMin  = new Vector2(1f, 1f);
-        menuBtnRT.anchorMax  = new Vector2(1f, 1f);
-        menuBtnRT.pivot      = new Vector2(1f, 1f);
-        menuBtnRT.anchoredPosition = new Vector2(-8f, -8f);
-        menuBtnRT.sizeDelta  = new Vector2(64f, 28f);
-        var menuBtnImg = menuBtnGO.AddComponent<Image>();
-        menuBtnImg.color = new Color32(0x12, 0x0C, 0x03, 0xCC);
-        var menuBtn = menuBtnGO.AddComponent<Button>();
-        menuBtn.targetGraphic = menuBtnImg;
-        var menuBtnTextGO = MakeGO("Text", menuBtnGO.transform);
-        var menuBtnTextRT  = menuBtnTextGO.GetComponent<RectTransform>();
-        menuBtnTextRT.anchorMin = Vector2.zero; menuBtnTextRT.anchorMax = Vector2.one;
-        menuBtnTextRT.offsetMin = Vector2.zero; menuBtnTextRT.offsetMax = Vector2.zero;
-        var menuBtnTMP = menuBtnTextGO.AddComponent<TextMeshProUGUI>();
-        menuBtnTMP.text      = "LOAD";
-        menuBtnTMP.fontSize  = 11f;
-        menuBtnTMP.color     = UITheme.GoldAccent;
-        menuBtnTMP.alignment = TextAlignmentOptions.Center;
+        // rightOffset: -8 = MENU, -102 = EDIT MAP, -196 = CHARACTER
+        var menuBtn      = MakeHudButton("MenuButton",      "≡  MENU",      -8f);
+        var editMapBtn   = MakeHudButton("EditMapButton",   "✎  EDIT MAP",  -102f);
+        var characterBtn = MakeHudButton("CharacterButton", "◈  CHARACTER", -196f);
 
-        // Wire menuButton and saveButton to GameManager if present
+        // Wire to GameManager if present
         var gameSystemGO = GameObject.Find("GameSystem");
         if (gameSystemGO != null)
         {
@@ -269,8 +260,9 @@ public static class UISceneBuilder
             if (gm != null)
             {
                 var gmSO = new SerializedObject(gm);
-                gmSO.FindProperty("menuButton").objectReferenceValue = menuBtn;
-                gmSO.FindProperty("saveButton").objectReferenceValue = saveBtn;
+                gmSO.FindProperty("menuButton").objectReferenceValue      = menuBtn;
+                gmSO.FindProperty("editMapButton").objectReferenceValue   = editMapBtn;
+                gmSO.FindProperty("characterButton").objectReferenceValue = characterBtn;
                 gmSO.ApplyModifiedProperties();
             }
         }
@@ -286,6 +278,9 @@ public static class UISceneBuilder
         SetupGameManager();
         BuildTitleScreen();
         BuildCharacterPopup();
+        BuildInGameMenuPanel();
+        BuildEditMapPanel();
+        BuildCharacterScreen();
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         Debug.Log("[UISceneBuilder] Full scene setup complete. Press Ctrl+S to save.");
     }
@@ -485,7 +480,7 @@ public static class UISceneBuilder
             delTextRT.anchorMin = Vector2.zero; delTextRT.anchorMax = Vector2.one;
             delTextRT.offsetMin = Vector2.zero; delTextRT.offsetMax = Vector2.zero;
             var delTMP = delTextGO.AddComponent<TextMeshProUGUI>();
-            delTMP.text      = "✕";
+            delTMP.text      = "X";
             delTMP.fontSize  = 12f;
             delTMP.color     = Color.white;
             delTMP.alignment = TextAlignmentOptions.Center;
@@ -600,8 +595,8 @@ public static class UISceneBuilder
         barHLG.childForceExpandWidth  = true;
         barHLG.childControlHeight = true;
         barHLG.childControlWidth  = true;
-        var stepBars = new Image[5];
-        for (int i = 0; i < 5; i++)
+        var stepBars = new Image[6]; // 6 steps (Name, Race, Class, Appearance, Backstory, Abilities)
+        for (int i = 0; i < 6; i++)
         {
             var barGO = MakeGO($"Bar{i}", barRowGO.transform);
             stepBars[i] = barGO.AddComponent<Image>();
@@ -647,8 +642,8 @@ public static class UISceneBuilder
         };
 
         // ── Step panels ─────────────────────────────────────────────────
-        // Indices: 0=ModeSelect 1=QuickCreate 2=Name 3=Race 4=Class 5=Appearance 6=Backstory 7=Confirm
-        var stepPanels = new GameObject[8];
+        // Indices: 0=Mode 1=Quick 2=Name 3=Race 4=Class 5=Appearance 6=Backstory 7=AbilityScores 8=Confirm
+        var stepPanels = new GameObject[9];
 
         // ── Panel 0: Mode Select ─────────────────────────────────────────
         stepPanels[0] = makeStepPanel("ModeSelectPanel");
@@ -730,22 +725,154 @@ public static class UISceneBuilder
         var backstoryInput = MakeInputField(stepPanels[6].transform, "My village was destroyed...", true);
         stepPanels[6].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
 
-        // ── Panel 7: Confirm ─────────────────────────────────────────────
-        stepPanels[7] = makeStepPanel("ConfirmPanel");
-        var confirmRowGO = MakeGO("PortraitRow", stepPanels[7].transform);
-        confirmRowGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        // ── Panel 7: Ability Scores (point-buy) ──────────────────────────
+        stepPanels[7] = makeStepPanel("AbilityScoresPanel");
+        stepPanels[7].GetComponent<VerticalLayoutGroup>().spacing = 4f;
+
+        // Header row: remaining points + AI suggest button
+        var abilityHeaderGO = MakeGO("AbilityHeader", stepPanels[7].transform);
+        abilityHeaderGO.AddComponent<LayoutElement>().preferredHeight = 30f;
+        abilityHeaderGO.AddComponent<Image>().color = Color.clear;
+        var aHHlg = abilityHeaderGO.AddComponent<HorizontalLayoutGroup>();
+        aHHlg.childForceExpandHeight = true; aHHlg.childForceExpandWidth = false;
+        aHHlg.childControlHeight = true; aHHlg.childControlWidth = true; aHHlg.spacing = 6f;
+
+        var abilityPtsGO = MakeGO("PointsLabel", abilityHeaderGO.transform);
+        abilityPtsGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        var abilityPtsTMP = abilityPtsGO.AddComponent<TextMeshProUGUI>();
+        abilityPtsTMP.fontSize  = 11f;
+        abilityPtsTMP.color     = UITheme.SystemText;
+        abilityPtsTMP.alignment = TextAlignmentOptions.MidlineLeft;
+        abilityPtsTMP.text      = $"Points remaining: 27 / 27";
+
+        var suggestBtnGO = MakeGO("SuggestButton", abilityHeaderGO.transform);
+        suggestBtnGO.AddComponent<LayoutElement>().preferredWidth = 100f;
+        var suggestImg = suggestBtnGO.AddComponent<Image>();
+        suggestImg.color = new Color32(0x28, 0x1E, 0x10, 0xFF);
+        var suggestBtn = suggestBtnGO.AddComponent<Button>();
+        suggestBtn.targetGraphic = suggestImg;
+        var suggestTextGO = MakeGO("Text", suggestBtnGO.transform);
+        var suggestRT = suggestTextGO.GetComponent<RectTransform>();
+        suggestRT.anchorMin = Vector2.zero; suggestRT.anchorMax = Vector2.one;
+        suggestRT.offsetMin = Vector2.zero; suggestRT.offsetMax = Vector2.zero;
+        var suggestTMP = suggestTextGO.AddComponent<TextMeshProUGUI>();
+        suggestTMP.text = "✦ AI Suggest";
+        suggestTMP.fontSize = 10f;
+        suggestTMP.color = UITheme.GoldAccent;
+        suggestTMP.alignment = TextAlignmentOptions.Center;
+
+        // Status text (AI feedback)
+        var abilityStatusGO = MakeGO("AbilityStatus", stepPanels[7].transform);
+        var abilityStatusLE = abilityStatusGO.AddComponent<LayoutElement>();
+        abilityStatusLE.preferredHeight = 16f; abilityStatusLE.flexibleHeight = 0f;
+        var abilityStatusTMP = abilityStatusGO.AddComponent<TextMeshProUGUI>();
+        abilityStatusTMP.fontSize  = 9f;
+        abilityStatusTMP.color     = UITheme.SystemText;
+        abilityStatusTMP.alignment = TextAlignmentOptions.Center;
+        abilityStatusTMP.text      = "";
+
+        // Six ability rows
+        string[] abilityNames = { "STR", "DEX", "CON", "INT", "WIS", "CHA" };
+        var abilityValueLabels = new TextMeshProUGUI[6];
+        var abilityModLabels   = new TextMeshProUGUI[6];
+
+        for (int ai = 0; ai < 6; ai++)
+        {
+            int captureAi = ai;
+            var rowGO = MakeGO($"Ability_{abilityNames[ai]}", stepPanels[7].transform);
+            var rowLE = rowGO.AddComponent<LayoutElement>();
+            rowLE.preferredHeight = 32f; rowLE.flexibleHeight = 0f;
+            rowGO.AddComponent<Image>().color = new Color32(0x22, 0x18, 0x0A, 0xFF);
+            var rowHLG = rowGO.AddComponent<HorizontalLayoutGroup>();
+            rowHLG.padding = new RectOffset(8, 8, 4, 4);
+            rowHLG.spacing = 6f;
+            rowHLG.childForceExpandHeight = true;
+            rowHLG.childForceExpandWidth  = false;
+            rowHLG.childControlHeight = true;
+            rowHLG.childControlWidth  = true;
+
+            // Ability name label
+            var nameGO = MakeGO("Name", rowGO.transform);
+            nameGO.AddComponent<LayoutElement>().preferredWidth = 36f;
+            var nameTMP = nameGO.AddComponent<TextMeshProUGUI>();
+            nameTMP.text = abilityNames[ai]; nameTMP.fontSize = 12f;
+            nameTMP.color = UITheme.GoldAccent; nameTMP.alignment = TextAlignmentOptions.MidlineLeft;
+            nameTMP.fontStyle = FontStyles.Bold;
+
+            // Minus button
+            var minusBtnGO = MakeGO("MinusBtn", rowGO.transform);
+            minusBtnGO.AddComponent<LayoutElement>().preferredWidth = 24f;
+            var minusBtnImg = minusBtnGO.AddComponent<Image>();
+            minusBtnImg.color = new Color32(0x38, 0x28, 0x10, 0xFF);
+            var minusBtn = minusBtnGO.AddComponent<Button>();
+            minusBtn.targetGraphic = minusBtnImg;
+            var minusTextGO = MakeGO("Text", minusBtnGO.transform);
+            var minusRT = minusTextGO.GetComponent<RectTransform>();
+            minusRT.anchorMin = Vector2.zero; minusRT.anchorMax = Vector2.one;
+            minusRT.offsetMin = Vector2.zero; minusRT.offsetMax = Vector2.zero;
+            var minusTMP = minusTextGO.AddComponent<TextMeshProUGUI>();
+            minusTMP.text = "−"; minusTMP.fontSize = 14f;
+            minusTMP.color = UITheme.SystemText; minusTMP.alignment = TextAlignmentOptions.Center;
+
+            // Score value label
+            var valGO = MakeGO("Value", rowGO.transform);
+            valGO.AddComponent<LayoutElement>().preferredWidth = 28f;
+            var valTMP = valGO.AddComponent<TextMeshProUGUI>();
+            valTMP.text = "8"; valTMP.fontSize = 14f; valTMP.fontStyle = FontStyles.Bold;
+            valTMP.color = UITheme.DmText; valTMP.alignment = TextAlignmentOptions.Center;
+            abilityValueLabels[ai] = valTMP;
+
+            // Plus button
+            var plusBtnGO = MakeGO("PlusBtn", rowGO.transform);
+            plusBtnGO.AddComponent<LayoutElement>().preferredWidth = 24f;
+            var plusBtnImg = plusBtnGO.AddComponent<Image>();
+            plusBtnImg.color = new Color32(0x38, 0x28, 0x10, 0xFF);
+            var plusBtn = plusBtnGO.AddComponent<Button>();
+            plusBtn.targetGraphic = plusBtnImg;
+            var plusTextGO = MakeGO("Text", plusBtnGO.transform);
+            var plusRT = plusTextGO.GetComponent<RectTransform>();
+            plusRT.anchorMin = Vector2.zero; plusRT.anchorMax = Vector2.one;
+            plusRT.offsetMin = Vector2.zero; plusRT.offsetMax = Vector2.zero;
+            var plusTMP = plusTextGO.AddComponent<TextMeshProUGUI>();
+            plusTMP.text = "+"; plusTMP.fontSize = 14f;
+            plusTMP.color = UITheme.GoldAccent; plusTMP.alignment = TextAlignmentOptions.Center;
+
+            // Modifier label (e.g. "+2")
+            var modGO = MakeGO("Mod", rowGO.transform);
+            modGO.AddComponent<LayoutElement>().preferredWidth = 32f;
+            var modTMP = modGO.AddComponent<TextMeshProUGUI>();
+            modTMP.text = "−1"; modTMP.fontSize = 11f;
+            modTMP.color = UITheme.PlaceholderText; modTMP.alignment = TextAlignmentOptions.MidlineLeft;
+            abilityModLabels[ai] = modTMP;
+
+            // Wire buttons to popup (late-bind via popup reference below)
+            int abilityIdx = captureAi;
+            // Buttons are wired after popup serialization below via a helper approach
+            // Store refs so we can wire them when we have the popup reference
+        }
+
+        // ── Panel 8: Confirm ─────────────────────────────────────────────
+        stepPanels[8] = makeStepPanel("ConfirmPanel");
+        var confirmRowGO = MakeGO("PortraitRow", stepPanels[8].transform);
+        confirmRowGO.AddComponent<LayoutElement>().preferredHeight = 120f;
         confirmRowGO.AddComponent<Image>().color = Color.clear;
         var cHLG = confirmRowGO.AddComponent<HorizontalLayoutGroup>();
         cHLG.spacing = 16f;
         cHLG.padding = new RectOffset(0, 0, 0, 0);
-        cHLG.childForceExpandHeight = true;
+        cHLG.childForceExpandHeight = false;  // let fixed-height portrait keep its 110px
         cHLG.childForceExpandWidth  = false;
         cHLG.childControlHeight = true;
         cHLG.childControlWidth  = true;
 
-        // Portrait image — Image (bg) on outer GO, RawImage on child GO
+        // Portrait image — fixed 110×110 square, no AspectRatioFitter (was causing oversized rendering)
         var portraitGO = MakeGO("PortraitImage", confirmRowGO.transform);
-        portraitGO.AddComponent<LayoutElement>().preferredWidth = 110f;
+        var portraitLE = portraitGO.AddComponent<LayoutElement>();
+        portraitLE.preferredWidth  = 110f;
+        portraitLE.preferredHeight = 110f;
+        portraitLE.minWidth        = 110f;
+        portraitLE.minHeight       = 110f;
+        portraitLE.flexibleWidth   = 0f;
+        portraitLE.flexibleHeight  = 0f;
         portraitGO.AddComponent<Image>().color = UITheme.BackgroundMid;
         var portraitRawGO = MakeGO("RawImage", portraitGO.transform);
         var portraitRawRT = portraitRawGO.GetComponent<RectTransform>();
@@ -763,7 +890,7 @@ public static class UISceneBuilder
         statsTMP.alignment = TextAlignmentOptions.TopLeft;
 
         // Begin button
-        var beginGO = MakeGO("BeginButton", stepPanels[7].transform);
+        var beginGO = MakeGO("BeginButton", stepPanels[8].transform);
         var beginLE = beginGO.AddComponent<LayoutElement>();
         beginLE.minHeight = 44f; beginLE.preferredHeight = 44f; beginLE.flexibleHeight = 0f;
         var beginImg = beginGO.AddComponent<Image>();
@@ -815,6 +942,11 @@ public static class UISceneBuilder
         SetProp(so, "classGridContainer",     classGrid.GetComponent<RectTransform>());
         SetProp(so, "appearanceInput",        appearanceInput);
         SetProp(so, "backstoryInput",         backstoryInput);
+        SetProp(so, "abilityPointsRemaining", abilityPtsTMP);
+        SetProp(so, "abilityStatusText",      abilityStatusTMP);
+        SetProp(so, "abilitySuggestButton",   suggestBtn);
+        SetArrayProp(so, "abilityValueLabels", abilityValueLabels);
+        SetArrayProp(so, "abilityModLabels",   abilityModLabels);
         SetProp(so, "portraitImage",          portraitRaw);
         SetProp(so, "statsText",              statsTMP);
         SetProp(so, "beginButton",            beginBtn);
@@ -826,6 +958,28 @@ public static class UISceneBuilder
         SetArrayProp(so, "stepBars",          stepBars);
         SetProp(so, "stepLabel",              stepLabelTMP);
         so.ApplyModifiedProperties();
+
+        // Wire +/- buttons to popup after serialization (requires popup MonoBehaviour instance)
+        var popupComp = popup as DnD.UI.CharacterCreationPopup;
+        if (popupComp != null)
+        {
+            var allMinusBtns = stepPanels[7].GetComponentsInChildren<Button>();
+            // The buttons in each row are: minus at index 0, plus at index 1
+            // Each row has 2 buttons, 6 rows = 12 total
+            int rowButtons = 0;
+            foreach (var btn in allMinusBtns)
+            {
+                if (btn.name == "MinusBtn" || btn.name == "PlusBtn")
+                {
+                    int abilityIdx = rowButtons / 2;
+                    bool isPlus    = btn.name == "PlusBtn";
+                    int delta = isPlus ? 1 : -1;
+                    if (abilityIdx < 6)
+                        btn.onClick.AddListener(() => popupComp.AdjustAbilityScore(abilityIdx, delta));
+                    rowButtons++;
+                }
+            }
+        }
 
         // Wire to GameManager if present
         var gmGO = GameObject.Find("GameSystem");
@@ -879,7 +1033,7 @@ public static class UISceneBuilder
         var tmp = go.AddComponent<TextMeshProUGUI>();
         tmp.color    = color;
         tmp.fontSize = size;
-        tmp.enableWordWrapping = false;
+        tmp.textWrappingMode = TMPro.TextWrappingModes.NoWrap;
         return tmp;
     }
 
@@ -945,7 +1099,7 @@ public static class UISceneBuilder
         phTMP.color     = UITheme.PlaceholderText;
         phTMP.fontSize  = UITheme.FontInput;
         phTMP.fontStyle = FontStyles.Italic;
-        phTMP.enableWordWrapping = multiline;
+        phTMP.textWrappingMode = multiline ? TMPro.TextWrappingModes.Normal : TMPro.TextWrappingModes.NoWrap;
         field.placeholder = phTMP;
 
         var txtGO = MakeGO("Text", textAreaGO.transform);
@@ -955,7 +1109,7 @@ public static class UISceneBuilder
         var txtTMP = txtGO.AddComponent<TextMeshProUGUI>();
         txtTMP.color    = UITheme.InputText;
         txtTMP.fontSize = UITheme.FontInput;
-        txtTMP.enableWordWrapping = multiline;
+        txtTMP.textWrappingMode = multiline ? TMPro.TextWrappingModes.Normal : TMPro.TextWrappingModes.NoWrap;
         field.textComponent = txtTMP;
 
         return field;
@@ -1025,8 +1179,625 @@ public static class UISceneBuilder
         subTMP.text = subtitle; subTMP.fontSize = 10f;
         subTMP.color = new Color(textColor.r / 255f, textColor.g / 255f, textColor.b / 255f, 0.75f);
         subTMP.alignment = TextAlignmentOptions.Center;
-        subTMP.enableWordWrapping = true;
+        subTMP.textWrappingMode = TMPro.TextWrappingModes.Normal;
         return btn;
+    }
+
+    [MenuItem("DnD/Build Edit Map Panel")]
+    public static void BuildEditMapPanel()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        foreach (var p in Object.FindObjectsByType<DnD.UI.EditMapPanel>(FindObjectsSortMode.None))
+            Undo.DestroyObjectImmediate(p.gameObject);
+
+        // Canvas (sortingOrder=16 — above InGameMenu=15)
+        var canvasGO = new GameObject("EditMapCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build EditMapPanel");
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 16;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        var editPanel = canvasGO.AddComponent<DnD.UI.EditMapPanel>();
+
+        // Dark overlay
+        var overlayGO = MakeGO("Overlay", canvasGO.transform);
+        var overlayRT = overlayGO.GetComponent<RectTransform>();
+        overlayRT.anchorMin = Vector2.zero; overlayRT.anchorMax = Vector2.one;
+        overlayRT.offsetMin = Vector2.zero; overlayRT.offsetMax = Vector2.zero;
+        overlayGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.8f);
+
+        // Center panel (700 × 520)
+        var panelGO = MakeGO("Panel", overlayGO.transform);
+        var panelRT = panelGO.GetComponent<RectTransform>();
+        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRT.sizeDelta        = new Vector2(720f, 540f);
+        panelRT.anchoredPosition = Vector2.zero;
+        panelGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var panelVLG = panelGO.AddComponent<VerticalLayoutGroup>();
+        panelVLG.padding = new RectOffset(0, 0, 0, 0);
+        panelVLG.spacing = 0f;
+        panelVLG.childForceExpandWidth = true; panelVLG.childForceExpandHeight = false;
+        panelVLG.childControlWidth = true; panelVLG.childControlHeight = true;
+
+        // Header bar
+        var headerGO = MakeGO("Header", panelGO.transform);
+        headerGO.AddComponent<LayoutElement>().preferredHeight = 40f;
+        headerGO.AddComponent<Image>().color = new Color32(0x12, 0x0C, 0x03, 0xFF);
+        var hRow = headerGO.AddComponent<HorizontalLayoutGroup>();
+        hRow.padding = new RectOffset(16, 8, 0, 0);
+        hRow.childForceExpandHeight = true; hRow.childForceExpandWidth = false;
+        hRow.childControlHeight = true; hRow.childControlWidth = true;
+        var hTitleGO = MakeGO("Title", headerGO.transform);
+        hTitleGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        var hTMP = hTitleGO.AddComponent<TextMeshProUGUI>();
+        hTMP.text = "EDIT MAP"; hTMP.fontSize = 16f;
+        hTMP.color = UITheme.GoldAccent; hTMP.alignment = TextAlignmentOptions.MidlineLeft;
+        hTMP.characterSpacing = 2f;
+        var closeHdrBtn = MenuMakeButton(headerGO.transform, "✕  Close", UITheme.SystemText, 28);
+        closeHdrBtn.GetComponent<LayoutElement>().preferredWidth = 80f;
+        closeHdrBtn.onClick.AddListener(() => editPanel.Close());
+
+        // Body: horizontal split (grid | editor)
+        var bodyGO = MakeGO("Body", panelGO.transform);
+        bodyGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        var bodyHLG = bodyGO.AddComponent<HorizontalLayoutGroup>();
+        bodyHLG.padding = new RectOffset(8, 8, 8, 8);
+        bodyHLG.spacing = 8f;
+        bodyHLG.childForceExpandHeight = true; bodyHLG.childForceExpandWidth = false;
+        bodyHLG.childControlHeight = true; bodyHLG.childControlWidth = true;
+
+        // ── Left: tile grid scroll view ──────────────────────────────────────
+        var gridScrollGO = MakeGO("GridScroll", bodyGO.transform);
+        gridScrollGO.AddComponent<LayoutElement>().flexibleWidth = 1.1f;
+        gridScrollGO.AddComponent<Image>().color = new Color32(0x18, 0x12, 0x08, 0xFF);
+        var gridScroll = gridScrollGO.AddComponent<ScrollRect>();
+        gridScroll.horizontal = false; gridScroll.scrollSensitivity = 20;
+
+        var gridViewportGO = MakeGO("Viewport", gridScrollGO.transform);
+        var gridViewportRT = gridViewportGO.GetComponent<RectTransform>();
+        gridViewportRT.anchorMin = Vector2.zero; gridViewportRT.anchorMax = Vector2.one;
+        gridViewportRT.offsetMin = Vector2.zero; gridViewportRT.offsetMax = Vector2.zero;
+        gridViewportGO.AddComponent<RectMask2D>();
+        gridScroll.viewport = gridViewportRT;
+
+        var gridContentGO = MakeGO("GridContent", gridViewportGO.transform);
+        var gridContentRT = gridContentGO.GetComponent<RectTransform>();
+        gridContentRT.anchorMin = new Vector2(0, 1); gridContentRT.anchorMax = new Vector2(1, 1);
+        gridContentRT.pivot     = new Vector2(0.5f, 1f);
+        gridContentRT.offsetMin = Vector2.zero; gridContentRT.offsetMax = Vector2.zero;
+        var gridLayout = gridContentGO.AddComponent<GridLayoutGroup>();
+        gridLayout.cellSize      = new Vector2(60f, 60f);
+        gridLayout.spacing       = new Vector2(4f, 4f);
+        gridLayout.padding       = new RectOffset(8, 8, 8, 8);
+        gridLayout.constraint    = GridLayoutGroup.Constraint.FixedColumnCount;
+        gridLayout.constraintCount = 7; // matches default map width
+        var gridCSF = gridContentGO.AddComponent<ContentSizeFitter>();
+        gridCSF.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        gridScroll.content = gridContentRT;
+
+        // ── Right: tile editor panel ─────────────────────────────────────────
+        var editorGO = MakeGO("TileEditor", bodyGO.transform);
+        var editorLE = editorGO.AddComponent<LayoutElement>();
+        editorLE.preferredWidth = 240f; editorLE.flexibleWidth = 0f;
+        editorGO.AddComponent<Image>().color = new Color32(0x1C, 0x14, 0x08, 0xFF);
+        var editorVLG = editorGO.AddComponent<VerticalLayoutGroup>();
+        editorVLG.padding = new RectOffset(10, 10, 10, 10);
+        editorVLG.spacing = 8f;
+        editorVLG.childForceExpandWidth = true; editorVLG.childForceExpandHeight = false;
+        editorVLG.childControlWidth = true; editorVLG.childControlHeight = true;
+
+        // Selected tile label
+        var selLabelGO = MakeGO("SelectedLabel", editorGO.transform);
+        selLabelGO.AddComponent<LayoutElement>().preferredHeight = 22f;
+        var selLabelTMP = selLabelGO.AddComponent<TextMeshProUGUI>();
+        selLabelTMP.text = "Select a tile to edit it";
+        selLabelTMP.fontSize = 11f; selLabelTMP.color = UITheme.GoldAccent;
+        selLabelTMP.alignment = TextAlignmentOptions.TopLeft;
+
+        // Tile preview thumbnail
+        var previewGO = MakeGO("TilePreview", editorGO.transform);
+        var previewLE = previewGO.AddComponent<LayoutElement>();
+        previewLE.preferredHeight = 80f; previewLE.preferredWidth = 80f;
+        previewLE.flexibleWidth = 0f;
+        previewGO.AddComponent<Image>().color = new Color32(0x28, 0x1E, 0x10, 0xFF);
+        var previewRawGO = MakeGO("RawImage", previewGO.transform);
+        var previewRawRT = previewRawGO.GetComponent<RectTransform>();
+        previewRawRT.anchorMin = Vector2.zero; previewRawRT.anchorMax = Vector2.one;
+        previewRawRT.offsetMin = new Vector2(4,4); previewRawRT.offsetMax = new Vector2(-4,-4);
+        var previewRaw = previewRawGO.AddComponent<RawImage>();
+        previewRaw.color = new Color32(0x4A, 0x38, 0x20, 0xFF);
+
+        // TileType label
+        var typeRowGO = MakeGO("TypeRow", editorGO.transform);
+        typeRowGO.AddComponent<LayoutElement>().preferredHeight = 20f;
+        var typeLabelTMP = typeRowGO.AddComponent<TextMeshProUGUI>();
+        typeLabelTMP.text = "TILE TYPE"; typeLabelTMP.fontSize = 9f;
+        typeLabelTMP.color = UITheme.SystemText; typeLabelTMP.fontStyle = FontStyles.Bold;
+        typeLabelTMP.alignment = TextAlignmentOptions.MidlineLeft;
+
+        // TileType dropdown
+        var dropGO = MakeGO("TileTypeDropdown", editorGO.transform);
+        dropGO.AddComponent<LayoutElement>().preferredHeight = 28f;
+        dropGO.AddComponent<Image>().color = new Color32(0x38, 0x28, 0x10, 0xFF);
+        var drop = dropGO.AddComponent<TMP_Dropdown>();
+        drop.options.Clear();
+        foreach (TileType tt in System.Enum.GetValues(typeof(TileType)))
+            drop.options.Add(new TMP_Dropdown.OptionData(tt.ToString()));
+        // Template child required by TMP_Dropdown
+        var dropTemplate = MakeGO("Template", dropGO.transform);
+        var dropTemplateRT = dropTemplate.GetComponent<RectTransform>();
+        dropTemplateRT.anchorMin = new Vector2(0,0); dropTemplateRT.anchorMax = new Vector2(1,0);
+        dropTemplateRT.pivot     = new Vector2(0.5f,1f);
+        dropTemplateRT.sizeDelta = new Vector2(0, 150f);
+        dropTemplate.AddComponent<Image>().color = new Color32(0x28, 0x1E, 0x10, 0xFF);
+        var dropScrollRect = dropTemplate.AddComponent<ScrollRect>();
+        var dropViewport = MakeGO("Viewport", dropTemplate.transform);
+        dropViewport.AddComponent<RectMask2D>();
+        var dropVpRT = dropViewport.GetComponent<RectTransform>();
+        dropVpRT.anchorMin = Vector2.zero; dropVpRT.anchorMax = Vector2.one;
+        dropVpRT.offsetMin = new Vector2(0,0); dropVpRT.offsetMax = new Vector2(0,-28);
+        var dropContent = MakeGO("Content", dropViewport.transform);
+        var dropContentRT = dropContent.GetComponent<RectTransform>();
+        dropContentRT.anchorMin = new Vector2(0,1); dropContentRT.anchorMax = new Vector2(1,1);
+        dropContentRT.pivot     = new Vector2(0.5f,1f);
+        dropContentRT.sizeDelta = new Vector2(0, 28f);
+        dropScrollRect.viewport = dropVpRT;
+        dropScrollRect.content  = dropContentRT;
+        var dropItem = MakeGO("Item", dropContent.transform);
+        var dropItemBtn = dropItem.AddComponent<Button>();
+        dropItem.AddComponent<Image>().color = Color.clear;
+        var dropItemToggle = dropItem.AddComponent<Toggle>();
+        var dropItemLabel = MakeGO("Item Label", dropItem.transform);
+        var dropItemLabelRT = dropItemLabel.GetComponent<RectTransform>();
+        dropItemLabelRT.anchorMin = Vector2.zero; dropItemLabelRT.anchorMax = Vector2.one;
+        dropItemLabelRT.offsetMin = new Vector2(10,0); dropItemLabelRT.offsetMax = new Vector2(-10,0);
+        var dropItemTMP = dropItemLabel.AddComponent<TextMeshProUGUI>();
+        dropItemTMP.color = UITheme.DmText; dropItemTMP.fontSize = 11f;
+        drop.itemText = dropItemTMP;
+        drop.template = dropTemplateRT;
+        dropTemplate.SetActive(false);
+        // Caption text
+        var captionGO = MakeGO("Label", dropGO.transform);
+        var captionRT = captionGO.GetComponent<RectTransform>();
+        captionRT.anchorMin = new Vector2(0,0); captionRT.anchorMax = new Vector2(1,1);
+        captionRT.offsetMin = new Vector2(8,0); captionRT.offsetMax = new Vector2(-24,0);
+        var captionTMP = captionGO.AddComponent<TextMeshProUGUI>();
+        captionTMP.color = UITheme.DmText; captionTMP.fontSize = 11f;
+        captionTMP.alignment = TextAlignmentOptions.MidlineLeft;
+        drop.captionText = captionTMP;
+        drop.value = 0; drop.RefreshShownValue();
+
+        // Description label
+        var descLabelGO = MakeGO("DescLabel", editorGO.transform);
+        descLabelGO.AddComponent<LayoutElement>().preferredHeight = 18f;
+        var descLabelTMP = descLabelGO.AddComponent<TextMeshProUGUI>();
+        descLabelTMP.text = "DESCRIPTION"; descLabelTMP.fontSize = 9f;
+        descLabelTMP.color = UITheme.SystemText; descLabelTMP.fontStyle = FontStyles.Bold;
+        descLabelTMP.alignment = TextAlignmentOptions.MidlineLeft;
+
+        // Description input
+        var descInput = MakeInputField(editorGO.transform, "Write a custom tile description...", true);
+        var descInputLE = descInput.GetComponent<LayoutElement>();
+        if (descInputLE == null) descInputLE = descInput.gameObject.AddComponent<LayoutElement>();
+        descInputLE.preferredHeight = 80f; descInputLE.flexibleHeight = 0f;
+
+        // Apply Changes button
+        var applyBtn = MenuMakeButton(editorGO.transform, "APPLY CHANGES", UITheme.SystemText, 30);
+        applyBtn.onClick.AddListener(() => editPanel.ApplyCurrentTileEdits());
+
+        // Regenerate Artwork button
+        var regenBtn = MenuMakeButton(editorGO.transform, "REGENERATE ARTWORK", UITheme.GoldAccent, 30);
+        regenBtn.onClick.AddListener(() => editPanel.RegenerateSelectedTile());
+
+        // Divider + Save button
+        MenuMakeDivider(editorGO.transform, UITheme.SystemText, 1);
+        var saveEditorBtn = MenuMakeButton(editorGO.transform, "SAVE GAME", UITheme.GoldAccent, 30);
+
+        // Wire EditMapPanel serialized fields
+        var editSO = new SerializedObject(editPanel);
+        SetProp(editSO, "tileGridContainer", gridContentGO.GetComponent<RectTransform>());
+        SetProp(editSO, "selectedTileLabel", selLabelTMP);
+        SetProp(editSO, "tileTypeDropdown",  drop);
+        SetProp(editSO, "descriptionInput",  descInput);
+        SetProp(editSO, "selectedTilePreview", previewRaw);
+        SetProp(editSO, "regenerateButton",  regenBtn);
+        SetProp(editSO, "applyButton",       applyBtn);
+        SetProp(editSO, "saveButton",        saveEditorBtn);
+        editSO.ApplyModifiedProperties();
+
+        // Wire Save button callback after panel has fields
+        saveEditorBtn.onClick.AddListener(() => editPanel.OnSaveRequested?.Invoke());
+
+        // Wire to GameManager
+        var gm = Object.FindAnyObjectByType<DnD.Managers.GameManager>();
+        if (gm != null)
+        {
+            var gmSO = new SerializedObject(gm);
+            var prop = gmSO.FindProperty("editMapPanel");
+            if (prop != null) { prop.objectReferenceValue = editPanel; gmSO.ApplyModifiedProperties(); }
+        }
+
+        canvasGO.SetActive(false);
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] EditMapPanel built. Press Ctrl+S to save.");
+    }
+
+    [MenuItem("DnD/Build Character Screen")]
+    public static void BuildCharacterScreen()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterScreenPanel>(FindObjectsSortMode.None))
+            Undo.DestroyObjectImmediate(p.gameObject);
+
+        // Canvas (sortingOrder=12)
+        var canvasGO = new GameObject("CharacterScreenCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build CharacterScreen");
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 12;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        var charPanel = canvasGO.AddComponent<DnD.UI.CharacterScreenPanel>();
+
+        // Dark overlay
+        var overlayGO = MakeGO("Overlay", canvasGO.transform);
+        var overlayRT = overlayGO.GetComponent<RectTransform>();
+        overlayRT.anchorMin = Vector2.zero; overlayRT.anchorMax = Vector2.one;
+        overlayRT.offsetMin = Vector2.zero; overlayRT.offsetMax = Vector2.zero;
+        overlayGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.8f);
+
+        // Center panel (560 × 520)
+        var panelGO = MakeGO("Panel", overlayGO.transform);
+        var panelRT = panelGO.GetComponent<RectTransform>();
+        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRT.sizeDelta        = new Vector2(560f, 540f);
+        panelRT.anchoredPosition = Vector2.zero;
+        panelGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+        var panelVLG = panelGO.AddComponent<VerticalLayoutGroup>();
+        panelVLG.padding = new RectOffset(0, 0, 0, 0);
+        panelVLG.spacing = 0f;
+        panelVLG.childForceExpandWidth = true; panelVLG.childForceExpandHeight = false;
+        panelVLG.childControlWidth = true; panelVLG.childControlHeight = true;
+
+        // Header
+        var headerGO = MakeGO("Header", panelGO.transform);
+        headerGO.AddComponent<LayoutElement>().preferredHeight = 40f;
+        headerGO.AddComponent<Image>().color = new Color32(0x12, 0x0C, 0x03, 0xFF);
+        var hRow = headerGO.AddComponent<HorizontalLayoutGroup>();
+        hRow.padding = new RectOffset(16, 8, 0, 0);
+        hRow.childForceExpandHeight = true; hRow.childForceExpandWidth = false;
+        hRow.childControlHeight = true; hRow.childControlWidth = true;
+        var hTitleGO = MakeGO("Title", headerGO.transform);
+        hTitleGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        var hTMP = hTitleGO.AddComponent<TextMeshProUGUI>();
+        hTMP.text = "CHARACTER SHEET"; hTMP.fontSize = 16f;
+        hTMP.color = UITheme.GoldAccent; hTMP.alignment = TextAlignmentOptions.MidlineLeft;
+        hTMP.characterSpacing = 2f;
+        var closeHdrBtn = MenuMakeButton(headerGO.transform, "✕  Close", UITheme.SystemText, 28);
+        closeHdrBtn.GetComponent<LayoutElement>().preferredWidth = 80f;
+        closeHdrBtn.onClick.AddListener(() => charPanel.Close());
+
+        // Body
+        var bodyGO = MakeGO("Body", panelGO.transform);
+        bodyGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        var bodyVLG = bodyGO.AddComponent<VerticalLayoutGroup>();
+        bodyVLG.padding = new RectOffset(16, 16, 12, 12);
+        bodyVLG.spacing = 10f;
+        bodyVLG.childForceExpandWidth = true; bodyVLG.childForceExpandHeight = false;
+        bodyVLG.childControlWidth = true; bodyVLG.childControlHeight = true;
+
+        // ── Portrait + identity row ──────────────────────────────────────────
+        var idRowGO = MakeGO("IdentityRow", bodyGO.transform);
+        idRowGO.AddComponent<LayoutElement>().preferredHeight = 130f;
+        idRowGO.AddComponent<Image>().color = Color.clear;
+        var idHLG = idRowGO.AddComponent<HorizontalLayoutGroup>();
+        idHLG.spacing = 16f;
+        idHLG.childForceExpandHeight = true; idHLG.childForceExpandWidth = false;
+        idHLG.childControlHeight = true; idHLG.childControlWidth = true;
+
+        // Portrait (fixed 120×120)
+        var portraitGO = MakeGO("Portrait", idRowGO.transform);
+        var portraitLE = portraitGO.AddComponent<LayoutElement>();
+        portraitLE.preferredWidth = 120f; portraitLE.minWidth = 120f; portraitLE.flexibleWidth = 0f;
+        portraitGO.AddComponent<Image>().color = new Color32(0x28, 0x1E, 0x10, 0xFF);
+        var portraitRawGO = MakeGO("RawImage", portraitGO.transform);
+        var portraitRawRT = portraitRawGO.GetComponent<RectTransform>();
+        portraitRawRT.anchorMin = Vector2.zero; portraitRawRT.anchorMax = Vector2.one;
+        portraitRawRT.offsetMin = Vector2.zero; portraitRawRT.offsetMax = Vector2.zero;
+        var portraitRaw = portraitRawGO.AddComponent<RawImage>();
+        portraitRaw.color = new Color32(0x4A, 0x38, 0x20, 0xFF);
+
+        // Identity text column
+        var idColGO = MakeGO("IdentityCol", idRowGO.transform);
+        idColGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        var idColVLG = idColGO.AddComponent<VerticalLayoutGroup>();
+        idColVLG.childForceExpandWidth = true; idColVLG.childForceExpandHeight = false;
+        idColVLG.childControlWidth = true; idColVLG.childControlHeight = true;
+        idColVLG.spacing = 4f;
+
+        var nameTMP    = AddInfoText(idColGO.transform, "Name",      UITheme.GoldAccent,  20f);
+        var raceClsTMP = AddInfoText(idColGO.transform, "RaceClass", UITheme.DmText,      13f);
+        var levelTMP   = AddInfoText(idColGO.transform, "Level",     UITheme.SystemText,  12f);
+        var hpTMP      = AddInfoText(idColGO.transform, "HP",        UITheme.SystemText,  12f);
+        var acTMP      = AddInfoText(idColGO.transform, "AC",        UITheme.SystemText,  12f);
+
+        // ── Ability scores row ───────────────────────────────────────────────
+        MenuMakeDivider(bodyGO.transform, UITheme.GoldAccent, 1);
+        var abRowGO = MakeGO("AbilityRow", bodyGO.transform);
+        abRowGO.AddComponent<LayoutElement>().preferredHeight = 70f;
+        abRowGO.AddComponent<Image>().color = new Color32(0x1C, 0x14, 0x08, 0xFF);
+        var abHLG = abRowGO.AddComponent<HorizontalLayoutGroup>();
+        abHLG.padding = new RectOffset(8, 8, 4, 4);
+        abHLG.spacing = 0f;
+        abHLG.childForceExpandHeight = true; abHLG.childForceExpandWidth = true;
+        abHLG.childControlHeight = true; abHLG.childControlWidth = true;
+
+        var abilityLabels = new TextMeshProUGUI[6];
+        string[] abNames = { "STR", "DEX", "CON", "INT", "WIS", "CHA" };
+        for (int i = 0; i < 6; i++)
+        {
+            // Background cell
+            var abGO = MakeGO(abNames[i], abRowGO.transform);
+            abGO.AddComponent<Image>().color = Color.clear;
+
+            // Text in a child GO so Image and TextMeshProUGUI don't share the same GameObject
+            var abTextGO = MakeGO("Text", abGO.transform);
+            var abTextRT = abTextGO.GetComponent<RectTransform>();
+            abTextRT.anchorMin = Vector2.zero; abTextRT.anchorMax = Vector2.one;
+            abTextRT.offsetMin = Vector2.zero; abTextRT.offsetMax = Vector2.zero;
+            var abTMP = abTextGO.AddComponent<TextMeshProUGUI>();
+            abTMP.text             = $"<b>{abNames[i]}</b>\n10\n<size=80%>(+0)</size>";
+            abTMP.fontSize         = 12f;
+            abTMP.color            = UITheme.DmText;
+            abTMP.alignment        = TextAlignmentOptions.Center;
+            abTMP.enableWordWrapping = false;
+            abilityLabels[i] = abTMP;
+        }
+
+        // ── Appearance + backstory (scrollable) ──────────────────────────────
+        MenuMakeDivider(bodyGO.transform, UITheme.GoldAccent, 1);
+
+        var loreScrollGO = MakeGO("LoreScroll", bodyGO.transform);
+        loreScrollGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        loreScrollGO.AddComponent<Image>().color = Color.clear;
+        var loreScroll = loreScrollGO.AddComponent<ScrollRect>();
+        loreScroll.horizontal = false; loreScroll.scrollSensitivity = 20;
+
+        var loreVpGO = MakeGO("Viewport", loreScrollGO.transform);
+        var loreVpRT = loreVpGO.GetComponent<RectTransform>();
+        loreVpRT.anchorMin = Vector2.zero; loreVpRT.anchorMax = Vector2.one;
+        loreVpRT.offsetMin = Vector2.zero; loreVpRT.offsetMax = Vector2.zero;
+        loreVpGO.AddComponent<RectMask2D>();
+        loreScroll.viewport = loreVpRT;
+
+        var loreContentGO = MakeGO("Content", loreVpGO.transform);
+        var loreContentRT = loreContentGO.GetComponent<RectTransform>();
+        loreContentRT.anchorMin = new Vector2(0,1); loreContentRT.anchorMax = new Vector2(1,1);
+        loreContentRT.pivot     = new Vector2(0.5f,1f);
+        loreContentRT.offsetMin = Vector2.zero; loreContentRT.offsetMax = Vector2.zero;
+        var loreVLG = loreContentGO.AddComponent<VerticalLayoutGroup>();
+        loreVLG.childForceExpandWidth = true; loreVLG.childForceExpandHeight = false;
+        loreVLG.childControlWidth = true; loreVLG.childControlHeight = true;
+        loreVLG.spacing = 6f;
+        loreContentGO.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        loreScroll.content = loreContentRT;
+
+        var appearLabelGO = MakeGO("AppearanceLabel", loreContentGO.transform);
+        var appearLabelLE = appearLabelGO.AddComponent<LayoutElement>();
+        appearLabelLE.minHeight = 14f;
+        var appearLabelTMP = appearLabelGO.AddComponent<TextMeshProUGUI>();
+        appearLabelTMP.text = "APPEARANCE"; appearLabelTMP.fontSize = 9f;
+        appearLabelTMP.color = UITheme.GoldAccent; appearLabelTMP.fontStyle = FontStyles.Bold;
+        appearLabelTMP.alignment = TextAlignmentOptions.TopLeft;
+
+        var appearTextGO = MakeGO("AppearanceText", loreContentGO.transform);
+        var appearTextLE = appearTextGO.AddComponent<LayoutElement>();
+        appearTextLE.minHeight = 20f;
+        var appearTextTMP = appearTextGO.AddComponent<TextMeshProUGUI>();
+        appearTextTMP.fontSize = 11f; appearTextTMP.color = UITheme.SystemText;
+        appearTextTMP.alignment = TextAlignmentOptions.TopLeft;
+        appearTextTMP.enableWordWrapping = true;
+
+        var backstoryLabelGO = MakeGO("BackstoryLabel", loreContentGO.transform);
+        backstoryLabelGO.AddComponent<LayoutElement>().minHeight = 14f;
+        var backstoryLabelTMP = backstoryLabelGO.AddComponent<TextMeshProUGUI>();
+        backstoryLabelTMP.text = "BACKSTORY"; backstoryLabelTMP.fontSize = 9f;
+        backstoryLabelTMP.color = UITheme.GoldAccent; backstoryLabelTMP.fontStyle = FontStyles.Bold;
+        backstoryLabelTMP.alignment = TextAlignmentOptions.TopLeft;
+
+        var backstoryTextGO = MakeGO("BackstoryText", loreContentGO.transform);
+        backstoryTextGO.AddComponent<LayoutElement>().minHeight = 20f;
+        var backstoryTextTMP = backstoryTextGO.AddComponent<TextMeshProUGUI>();
+        backstoryTextTMP.fontSize = 11f; backstoryTextTMP.color = UITheme.DmText;
+        backstoryTextTMP.alignment = TextAlignmentOptions.TopLeft;
+        backstoryTextTMP.enableWordWrapping = true;
+
+        // Wire CharacterScreenPanel fields
+        var charSO = new SerializedObject(charPanel);
+        SetProp(charSO, "portraitImage",   portraitRaw);
+        SetProp(charSO, "nameText",        nameTMP);
+        SetProp(charSO, "raceClassText",   raceClsTMP);
+        SetProp(charSO, "levelText",       levelTMP);
+        SetProp(charSO, "hpText",          hpTMP);
+        SetProp(charSO, "acText",          acTMP);
+        SetArrayProp(charSO, "abilityLabels", abilityLabels);
+        SetProp(charSO, "appearanceText",  appearTextTMP);
+        SetProp(charSO, "backstoryText",   backstoryTextTMP);
+        charSO.ApplyModifiedProperties();
+
+        // Wire to GameManager
+        var gm = Object.FindAnyObjectByType<DnD.Managers.GameManager>();
+        if (gm != null)
+        {
+            var gmSO = new SerializedObject(gm);
+            var prop = gmSO.FindProperty("characterScreenPanel");
+            if (prop != null) { prop.objectReferenceValue = charPanel; gmSO.ApplyModifiedProperties(); }
+        }
+
+        canvasGO.SetActive(false);
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] CharacterScreen built. Press Ctrl+S to save.");
+    }
+
+    [MenuItem("DnD/Build In-Game Menu Panel")]
+    public static void BuildInGameMenuPanel()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        // Remove old panel
+        foreach (var p in Object.FindObjectsByType<DnD.UI.InGameMenuPanel>(FindObjectsSortMode.None))
+            Undo.DestroyObjectImmediate(p.gameObject);
+
+        // ── Canvas (sortingOrder=15, above HUD but below TitleScreen=20) ─
+        var canvasGO = new GameObject("InGameMenuCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build InGameMenu");
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 15;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        // Attach InGameMenuPanel component to canvas root (starts hidden)
+        var menuPanel = canvasGO.AddComponent<DnD.UI.InGameMenuPanel>();
+
+        // ── Dark overlay ──────────────────────────────────────────────────
+        var overlayGO = MakeGO("Overlay", canvasGO.transform);
+        var overlayRT = overlayGO.GetComponent<RectTransform>();
+        overlayRT.anchorMin = Vector2.zero; overlayRT.anchorMax = Vector2.one;
+        overlayRT.offsetMin = Vector2.zero; overlayRT.offsetMax = Vector2.zero;
+        overlayGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.75f);
+
+        // ── Center panel (380 × 480) ──────────────────────────────────────
+        var panelGO = MakeGO("Panel", overlayGO.transform);
+        var panelRT = panelGO.GetComponent<RectTransform>();
+        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRT.sizeDelta        = new Vector2(380, 480);
+        panelRT.anchoredPosition = Vector2.zero;
+        panelGO.AddComponent<Image>().color = UITheme.BackgroundMid;
+
+        var vlg = panelGO.AddComponent<VerticalLayoutGroup>();
+        vlg.padding                = new RectOffset(16, 16, 16, 16);
+        vlg.spacing                = 8;
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childControlWidth      = true;
+        vlg.childControlHeight     = true;
+
+        // Header
+        MenuMakeLabel(panelGO.transform, "GAME MENU", 18f, UITheme.GoldAccent,
+            TextAlignmentOptions.Center, 36);
+        MenuMakeDivider(panelGO.transform, UITheme.GoldAccent, 2);
+
+        // Save button
+        var saveBtn = MenuMakeButton(panelGO.transform, "SAVE GAME", UITheme.GoldAccent);
+        saveBtn.onClick.AddListener(() => menuPanel.OnSave?.Invoke());
+
+        // Load / Main Menu button
+        var loadBtn = MenuMakeButton(panelGO.transform, "LOAD / MAIN MENU", UITheme.SystemText);
+        loadBtn.onClick.AddListener(() => menuPanel.OnLoad?.Invoke());
+
+        MenuMakeDivider(panelGO.transform, UITheme.SystemText, 1);
+
+        // Tile regeneration header
+        MenuMakeLabel(panelGO.transform, "REGENERATE TILE", 11f, UITheme.SystemText,
+            TextAlignmentOptions.Center, 20);
+
+        // Tile list container
+        var listGO = MakeGO("TileListContainer", panelGO.transform);
+        var listVLG = listGO.AddComponent<VerticalLayoutGroup>();
+        listVLG.spacing                = 2;
+        listVLG.childForceExpandWidth  = true;
+        listVLG.childForceExpandHeight = false;
+        listVLG.childControlWidth      = true;
+        listVLG.childControlHeight     = false;
+        var listCSF = listGO.AddComponent<ContentSizeFitter>();
+        listCSF.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        listGO.AddComponent<LayoutElement>().flexibleHeight = 1;
+
+        MenuMakeDivider(panelGO.transform, UITheme.SystemText, 1);
+
+        // Resume button
+        var resumeBtn = MenuMakeButton(panelGO.transform, "RESUME ADVENTURE", UITheme.DmText);
+        resumeBtn.onClick.AddListener(() => menuPanel.Close());
+
+        // Wire tileListContainer on InGameMenuPanel
+        var menuSO = new SerializedObject(menuPanel);
+        menuSO.FindProperty("tileListContainer").objectReferenceValue = listGO;
+        menuSO.ApplyModifiedProperties();
+
+        // Wire inGameMenuPanel on GameManager
+        var gm = Object.FindAnyObjectByType<DnD.Managers.GameManager>();
+        if (gm != null)
+        {
+            var gmSO = new SerializedObject(gm);
+            var prop = gmSO.FindProperty("inGameMenuPanel");
+            if (prop != null) { prop.objectReferenceValue = menuPanel; gmSO.ApplyModifiedProperties(); }
+        }
+
+        canvasGO.SetActive(false);
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] InGameMenuPanel built. Press Ctrl+S to save.");
+    }
+
+    private static Button MenuMakeButton(Transform parent, string label, Color textColor, float height = 36)
+    {
+        var go = MakeGO(label.Replace(" ", "") + "Btn", parent);
+        go.AddComponent<LayoutElement>().preferredHeight = height;
+        var img = go.AddComponent<Image>();
+        img.color = new Color32(0x28, 0x1E, 0x10, 0xFF);
+        var btn = go.AddComponent<Button>();
+        btn.targetGraphic = img;
+        var colors = btn.colors;
+        colors.highlightedColor = new Color32(0x3C, 0x2A, 0x14, 0xFF);
+        btn.colors = colors;
+        var txtGO = MakeGO("Text", go.transform);
+        var rt = txtGO.GetComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+        var tmp = txtGO.AddComponent<TextMeshProUGUI>();
+        tmp.text      = label;
+        tmp.fontSize  = 12f;
+        tmp.color     = textColor;
+        tmp.alignment = TextAlignmentOptions.Center;
+        return btn;
+    }
+
+    private static void MenuMakeDivider(Transform parent, Color color, float height)
+    {
+        var go = MakeGO("Divider", parent);
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredHeight = height;
+        le.flexibleWidth   = 1;
+        go.AddComponent<Image>().color = color;
+    }
+
+    private static void MenuMakeLabel(Transform parent, string text, float fontSize, Color color,
+        TextAlignmentOptions align, float height = 24)
+    {
+        var go = MakeGO("Label_" + text.Replace(" ",""), parent);
+        go.AddComponent<LayoutElement>().preferredHeight = height;
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        tmp.text      = text;
+        tmp.fontSize  = fontSize;
+        tmp.color     = color;
+        tmp.alignment = align;
     }
 
     private static void AddHeader(Transform parent, string title)

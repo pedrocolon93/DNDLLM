@@ -10,6 +10,8 @@ using DnD.Combat;
 using DNDLLM.Map;
 using DnD.Data;
 using DNDLLM.Services;
+using DNDLLM.Utils;
+using DNDLLM.World;
 
 namespace DnD.Managers
 {
@@ -35,17 +37,20 @@ namespace DnD.Managers
         [SerializeField] private DnD.UI.TitleScreen             titleScreen;
         [SerializeField] private DnD.UI.CharacterCreationPopup  characterPopup;
         [SerializeField] private UnityEngine.UI.Button          menuButton;
-        [SerializeField] private UnityEngine.UI.Button          saveButton;
+        [SerializeField] private DnD.UI.InGameMenuPanel         inGameMenuPanel;
+        [SerializeField] private UnityEngine.UI.Button          editMapButton;
+        [SerializeField] private DnD.UI.EditMapPanel            editMapPanel;
+        [SerializeField] private UnityEngine.UI.Button          characterButton;
+        [SerializeField] private DnD.UI.CharacterScreenPanel    characterScreenPanel;
 
         private int _currentSlotIndex = 0;
         private string _campaignSeed = "";
         private string _appearanceDescription = "";
+        private string _backstory = "";
         private Texture2D _characterPortrait;
-
-        // Set true after a new-game character creation so we prompt to save after map loads
-        private bool _askSaveAfterMap = false;
-        // Set true while waiting for the player to type "yes" or "no" to the save prompt
-        private bool _awaitingMapSaveConfirm = false;
+        private List<DnD.Data.TileDescriptionEntry> _pendingTileDescriptions;
+        private List<DnD.Data.TileGridEntry>        _pendingTileGrid;
+        private readonly MapGraph _mapGraph = new MapGraph();
 
         private DungeonMaster dungeonMaster;
         private CommandParser commandParser;
@@ -77,7 +82,7 @@ namespace DnD.Managers
                 _initStatus = "yielding frame";
                 await System.Threading.Tasks.Task.Yield();
 
-                var chatSearch = FindFirstObjectByType<ChatUI>(FindObjectsInactive.Include);
+                var chatSearch = FindAnyObjectByType<ChatUI>(FindObjectsInactive.Include);
                 if (ChatUI.Instance == null && chatSearch != null)
                     ChatUI.Instance = chatSearch;
 
@@ -89,8 +94,21 @@ namespace DnD.Managers
                 if (menuButton != null)
                     menuButton.onClick.AddListener(OnMenuButtonPressed);
 
-                if (saveButton != null)
-                    saveButton.onClick.AddListener(OnSaveButtonPressed);
+                if (inGameMenuPanel != null)
+                {
+                    inGameMenuPanel.OnSave            = OnSaveFromMenu;
+                    inGameMenuPanel.OnLoad            = OnLoadFromMenu;
+                    inGameMenuPanel.OnRegenerateTile  = OnRegenerateTileFromMenu;
+                }
+
+                if (editMapButton != null)
+                    editMapButton.onClick.AddListener(OnEditMapButtonPressed);
+
+                if (editMapPanel != null)
+                    editMapPanel.OnSaveRequested = () => { SaveCurrentSlot(); ChatUI.Instance?.AddSystemMessage("Map changes saved."); };
+
+                if (characterButton != null)
+                    characterButton.onClick.AddListener(OnCharacterButtonPressed);
 
                 ChangeState(GameState.MainMenu);
                 _initStatus = "ready - state: " + currentState;
@@ -138,7 +156,7 @@ namespace DnD.Managers
             await dungeonMaster.InitializeAsync(llmProvider);
 
             // Initialize Command Parser
-            commandParser = FindFirstObjectByType<CommandParser>();
+            commandParser = FindAnyObjectByType<CommandParser>();
             if (commandParser == null)
             {
                 GameObject parserObj = new GameObject("CommandParser");
@@ -270,12 +288,67 @@ namespace DnD.Managers
 
         private void OnMenuButtonPressed()
         {
-            // Only save if we're in an active game — not during menus or character creation
             if (currentState == GameState.Exploration ||
                 currentState == GameState.Combat      ||
                 currentState == GameState.Dialogue)
-                SaveCurrentSlot();
+            {
+                if (inGameMenuPanel != null)
+                {
+                    int px = MapCharacterController.Instance?.GridX ?? 0;
+                    int py = MapCharacterController.Instance?.GridY ?? 0;
+                    inGameMenuPanel.Open(px, py);
+                }
+                else
+                {
+                    SaveCurrentSlot();
+                    ChangeState(GameState.MainMenu);
+                }
+            }
+            else
+            {
+                ChangeState(GameState.MainMenu);
+            }
+        }
+
+        private void OnEditMapButtonPressed()
+        {
+            if (currentState == GameState.Exploration ||
+                currentState == GameState.Combat      ||
+                currentState == GameState.Dialogue)
+            {
+                inGameMenuPanel?.Close();
+                editMapPanel?.Open();
+            }
+        }
+
+        private void OnCharacterButtonPressed()
+        {
+            if (currentState == GameState.Exploration ||
+                currentState == GameState.Combat      ||
+                currentState == GameState.Dialogue)
+            {
+                characterScreenPanel?.Open(playerCharacter, _characterPortrait,
+                    _appearanceDescription, _backstory);
+            }
+        }
+
+        private void OnSaveFromMenu()
+        {
+            SaveCurrentSlot();
+            ChatUI.Instance?.AddSystemMessage("Game saved.");
+        }
+
+        private void OnLoadFromMenu()
+        {
+            inGameMenuPanel?.Close();
             ChangeState(GameState.MainMenu);
+        }
+
+        private async void OnRegenerateTileFromMenu(int x, int y)
+        {
+            inGameMenuPanel?.Close();
+            if (MapGenerator.Instance != null)
+                await MapGenerator.Instance.RegenerateTileAsync(x, y);
         }
 
         private void OnSaveButtonPressed()
@@ -294,7 +367,7 @@ namespace DnD.Managers
         {
             _characterPortrait       = data.portrait;
             _appearanceDescription   = data.appearanceDescription ?? "";
-            _askSaveAfterMap         = true;  // new game: prompt to save after map loads
+            _backstory               = data.backstory              ?? "";
 
             if (playerCharacter == null)
             {
@@ -311,7 +384,7 @@ namespace DnD.Managers
                 data.characterClass == CharacterClassName.Rogue    ?  8 : 8);
 
             playerCharacter.characterClass = charClass;
-            playerCharacter.abilities = AbilityScores.GenerateRandom();
+            playerCharacter.abilities = data.abilities ?? AbilityScores.GenerateRandom();
             playerCharacter.Initialize();
 
             if (ChatUI.Instance != null)
@@ -357,8 +430,29 @@ namespace DnD.Managers
                                             ? ChatUI.Instance.GetMessageHistory()
                                             : new System.Collections.Generic.List<ChatMessageData>()
             };
-            saveData.slotLabel = $"{saveData.characterName} · {saveData.className} · Lv{saveData.level}";
-            DNDLLM.Services.SaveSystem.Save(_currentSlotIndex, saveData, portrait);
+            saveData.slotLabel  = $"{saveData.characterName} · {saveData.className} · Lv{saveData.level}";
+            saveData.backstory  = _backstory;
+
+            // Persist tile descriptions and full per-tile grid state (captures EditMapPanel changes)
+            if (MapGenerator.Instance?.grid != null)
+            {
+                var gen = MapGenerator.Instance;
+                saveData.tileDescriptions = gen.GetTileDescriptions();
+                saveData.tileGrid = new List<DnD.Data.TileGridEntry>();
+                for (int gx = 0; gx < gen.width; gx++)
+                for (int gy = 0; gy < gen.height; gy++)
+                    saveData.tileGrid.Add(new DnD.Data.TileGridEntry
+                    {
+                        x           = gx,
+                        y           = gy,
+                        tileType    = gen.grid[gx, gy].type.ToString(),
+                        description = gen.grid[gx, gy].description,
+                    });
+            }
+
+            // Use the caller-supplied portrait, else the stored one (may be the generated map token)
+            UnityEngine.Texture2D savePortrait = portrait ?? _characterPortrait;
+            DNDLLM.Services.SaveSystem.Save(_currentSlotIndex, saveData, savePortrait);
             Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel}");
         }
 
@@ -372,11 +466,21 @@ namespace DnD.Managers
                 return;
             }
 
+            // Clear any entities and world graph from a previous session
+            MapEntityController.ClearAll();
+            _mapGraph.Reset();
+
             _currentSlotIndex        = slotIndex;
             _campaignSeed            = data.campaignSeed ?? "";
             _appearanceDescription   = data.appearanceDescription ?? "";
+            _backstory               = data.backstory ?? "";
             _characterPortrait       = portrait;
-            _askSaveAfterMap         = false;  // loading a save — no save prompt needed
+
+            // Queue tile descriptions and per-tile grid to be applied once the map finishes generating
+            _pendingTileDescriptions = (data.tileDescriptions != null && data.tileDescriptions.Count > 0)
+                ? data.tileDescriptions : null;
+            _pendingTileGrid = (data.tileGrid != null && data.tileGrid.Count > 0)
+                ? data.tileGrid : null;
 
             if (playerCharacter == null)
             {
@@ -439,8 +543,31 @@ namespace DnD.Managers
         private const string DM_SYSTEM_PROMPT =
             "You are an expert Dungeon Master for a D&D 5e adventure. " +
             "Write vivid, immersive descriptions in 2-4 sentences. " +
-            "Always end your response with exactly 3 suggested actions for the player, " +
-            "each on its own line prefixed with '► '. Keep suggestions short (5-8 words each).";
+            "Always end your narrative with exactly 3 suggested actions for the player, " +
+            "each on its own line prefixed with '► '. Keep suggestions short (5-8 words each).\n\n" +
+            "You have access to game tools. After the ► suggestions you MAY append a " +
+            "[GM_ACTIONS] block to drive game state. Only include actions the narrative warrants. " +
+            "Omit the block entirely if nothing should happen mechanically.\n\n" +
+            "Available tools (one command per line inside the block):\n" +
+            "  MOVE player <north|south|east|west>\n" +
+            "  DAMAGE player <amount>\n" +
+            "  HEAL player <amount>\n" +
+            "  ADD_CONDITION player <poisoned|blinded|stunned|frightened>\n" +
+            "  REMOVE_CONDITION player <condition>\n" +
+            "  SPAWN_ENEMY <name> <hp> <ac>\n" +
+            "  AWARD_XP <amount>\n" +
+            "  KILL_ENTITY <name>             (removes an enemy/NPC from the map)\n" +
+            "  LOCK_DOOR <x> <y>              (bars a passage — player cannot pass)\n" +
+            "  UNLOCK_DOOR <x> <y>            (opens a previously locked passage)\n" +
+            "  ENTER_SUBREGION <description>  (transport player into a named sub-area, e.g. 'dark armory' or 'flooded cellar')\n\n" +
+            "Example response ending:\n" +
+            "► Search the body\n" +
+            "► Retreat north\n" +
+            "► Call for help\n" +
+            "[GM_ACTIONS]\n" +
+            "DAMAGE player 4\n" +
+            "AWARD_XP 25\n" +
+            "[/GM_ACTIONS]";
 
 
         private void StartExploration()
@@ -449,10 +576,16 @@ namespace DnD.Managers
                 ChatUI.Instance.AddSystemMessage("=== YOUR ADVENTURE BEGINS ===");
             _isResumingLoad = false;
 
+            // Reset world graph for this campaign
+            string rootTheme = _campaignSeed.Length > 0 ? _campaignSeed.Split(',')[0].Trim() : "dungeon";
+            _mapGraph.InitRoot(rootTheme);
+
             if (MapGenerator.Instance != null)
             {
                 MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
                 MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
+                // Skip LLM description generation when we have saved descriptions to restore
+                MapGenerator.Instance.SkipDescriptionGeneration = _pendingTileDescriptions != null;
                 MapGenerator.Instance.GenerateMap(
                     _campaignSeed.Length > 0 ? _campaignSeed : "dungeon");
             }
@@ -461,30 +594,79 @@ namespace DnD.Managers
         private async void OnMapReadyNarrate()
         {
             MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
+
+            var gen = MapGenerator.Instance;
+
+            // Restore saved tile descriptions (skips the LLM description call on reload)
+            if (_pendingTileDescriptions != null)
+            {
+                gen.LoadTileDescriptions(_pendingTileDescriptions);
+                _pendingTileDescriptions = null;
+            }
+
+            // Restore per-tile type+description overrides saved by EditMapPanel
+            if (_pendingTileGrid != null && gen.grid != null)
+            {
+                foreach (var entry in _pendingTileGrid)
+                {
+                    if (entry.x < 0 || entry.x >= gen.width || entry.y < 0 || entry.y >= gen.height) continue;
+                    if (System.Enum.TryParse<TileType>(entry.tileType, out TileType t))
+                    {
+                        gen.grid[entry.x, entry.y].type        = t;
+                        gen.grid[entry.x, entry.y].walkable    = t == TileType.Floor || t == TileType.Exit
+                                                               || t == TileType.Door  || t == TileType.NpcSpawn;
+                    }
+                    if (!string.IsNullOrEmpty(entry.description))
+                        gen.grid[entry.x, entry.y].description = entry.description;
+                }
+                _pendingTileGrid = null;
+            }
+
             if (LLMService.Instance == null) return;
 
             // ── 1. DM opening narration ───────────────────────────────────
             if (ChatUI.Instance != null)
             {
                 string seed = string.IsNullOrEmpty(_campaignSeed) ? "a mysterious dungeon" : _campaignSeed;
+
+                string tileCtx = "";
+                if (MapGenerator.Instance != null)
+                    tileCtx = "\n\nStarting area:\n" + MapGenerator.Instance.GetTileContext(
+                        MapGenerator.Instance.width / 2, 1);
+
                 string userPrompt =
                     $"The adventurer enters: {seed}. " +
-                    "Describe what they see and sense as they arrive, then suggest 3 possible first actions.";
-                string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
-                if (!string.IsNullOrEmpty(narration))
-                    ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
+                    "Describe what they see and sense as they arrive, then suggest 3 possible first actions." +
+                    tileCtx;
+
+                string rawNarration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
+                if (!string.IsNullOrEmpty(rawNarration))
+                {
+                    string narrative = GMToolExecutor.ExtractNarrative(rawNarration);
+                    if (!string.IsNullOrEmpty(narrative))
+                        ChatUI.Instance.AddDMMessage(narrative, useTypewriter: true);
+
+                    var actionResults = GMToolExecutor.ExecuteActions(rawNarration, playerCharacter);
+                    foreach (string r in actionResults)
+                        ChatUI.Instance.AddSystemMessage(r);
+                }
             }
 
             // ── 2. Generate and place character token on the map ─────────
             await SpawnCharacterOnMapAsync();
 
-            // ── 3. Prompt to save (new games only) ───────────────────────
-            if (_askSaveAfterMap && ChatUI.Instance != null)
-            {
-                _askSaveAfterMap = false;
-                ChatUI.Instance.AddSystemMessage("Would you like to save your adventure? (type yes / no)");
-                _awaitingMapSaveConfirm = true;
-            }
+            // ── 3. Spawn enemy / NPC tokens ───────────────────────────────
+            await SpawnMapEntitiesAsync();
+
+            // ── 4. Save root snapshot into map graph ─────────────────────
+            var cc = MapCharacterController.Instance;
+            var rootSnap = MapGenerator.Instance?.TakeSnapshot(cc?.GridX ?? 0, cc?.GridY ?? 0);
+            if (rootSnap != null) _mapGraph.SaveCurrentSnapshot(rootSnap);
+
+            // ── 5. Auto-save ──────────────────────────────────────────────
+            SaveCurrentSlot();
+            if (ChatUI.Instance != null)
+                ChatUI.Instance.AddSystemMessage("Adventure saved.");
         }
 
         private async Task SpawnCharacterOnMapAsync()
@@ -506,17 +688,26 @@ namespace DnD.Managers
                 string charPrompt =
                     $"Square, 1:1 aspect ratio. Top-down RPG map token: {race} {cls} adventurer, " +
                     $"viewed directly from above.{appearance} " +
-                    "Small heroic figure centered on tile. Match the exact art style, " +
-                    "color palette, and brushwork of the reference tile. " +
+                    "Small heroic figure on a FULLY TRANSPARENT background — no floor, no tile, no ground. " +
+                    "The character and equipment are the only visible elements. " +
+                    "Match the exact art style, color palette, and brushwork of the reference tile. " +
                     "Flat overhead view, no border, no drop shadow.";
+
+                if (DnD.UI.ChatUI.Instance != null)
+                    DnD.UI.ChatUI.Instance.AddSystemMessage("Generating character sprite...");
 
                 charTex = await LLMService.Instance.GenerateStyledTile(
                     charPrompt, MapGenerator.Instance.StyleAnchor);
+                if (charTex != null)
+                    charTex = SpriteBackgroundRemover.RemoveBackground(charTex);
                 Debug.Log($"[GameManager] Character tile generated: {(charTex != null ? "OK" : "failed")}");
             }
 
             // Fall back to the character portrait if generation failed
             if (charTex == null) charTex = _characterPortrait;
+
+            // Update _characterPortrait so the next save persists the generated token
+            if (charTex != null) _characterPortrait = charTex;
 
             // Starting cell: just inside the south entrance (bottom door)
             int startX = MapGenerator.Instance.width  / 2;
@@ -526,32 +717,252 @@ namespace DnD.Managers
             if (MapCharacterController.Instance == null)
             {
                 var go = new GameObject("MapCharacter");
+                go.AddComponent<SpriteRenderer>();         // must be added BEFORE MapCharacterController
                 go.AddComponent<MapCharacterController>();
             }
 
             MapCharacterController.Instance?.Initialize(charTex, startX, startY);
         }
 
+        // ── Sub-map traversal (MapGraph-backed) ──────────────────────────────
+
+        /// <summary>Player stepped onto a Door tile — enter or revisit the room behind it.</summary>
+        private async Task TryEnterRoom()
+        {
+            var cc  = MapCharacterController.Instance;
+            var gen = MapGenerator.Instance;
+            if (cc == null || gen == null) return;
+
+            // Build a rich theme that tells the LLM what environment surrounds this door
+            string parentCtx = gen.GetTileContext(cc.GridX, cc.GridY);
+            string subTheme  = $"interior room inside {(_campaignSeed.Length > 0 ? _campaignSeed : "dungeon")}";
+
+            await EnterSubregionViaKey(
+                $"door_{cc.GridX}_{cc.GridY}",
+                subTheme,
+                cc.GridX, cc.GridY,
+                "You step through the doorway...",
+                parentCtx);
+        }
+
+        /// <summary>Called by GMToolExecutor ENTER_SUBREGION command.</summary>
+        public void RequestSubregionEntry(string description)
+        {
+            var cc  = MapCharacterController.Instance;
+            var gen = MapGenerator.Instance;
+            string parentCtx = (cc != null && gen != null)
+                ? gen.GetTileContext(cc.GridX, cc.GridY) : "";
+            _ = EnterSubregionViaKey(
+                $"region_{description.ToLower().Trim().Replace(" ", "_")}",
+                description,
+                cc?.GridX ?? 0,
+                cc?.GridY ?? 0,
+                $"Entering: {description}...",
+                parentCtx);
+        }
+
+        private async Task EnterSubregionViaKey(string graphKey, string childTheme,
+                                                 int returnX, int returnY,
+                                                 string announceMsg,
+                                                 string parentContext = "")
+        {
+            var gen = MapGenerator.Instance;
+            var cc  = MapCharacterController.Instance;
+            if (gen == null) return;
+
+            // Snapshot the current map into the graph node before leaving
+            var currentSnap = gen.TakeSnapshot(cc?.GridX ?? returnX, cc?.GridY ?? returnY);
+            _mapGraph.SaveCurrentSnapshot(currentSnap);
+
+            // Resolve child node — door keys use coordinates, region keys use name
+            string childId;
+            bool   isNew;
+            if (graphKey.StartsWith("region_"))
+                (childId, isNew) = _mapGraph.GetOrCreateRegionChild(
+                    graphKey.Substring("region_".Length), childTheme);
+            else
+                (childId, isNew) = _mapGraph.GetOrCreateDoorChild(returnX, returnY, childTheme);
+
+            MapEntityController.ClearAll();
+            ChatUI.Instance?.AddSystemMessage(announceMsg);
+
+            _mapGraph.NavigateTo(childId);
+            var childNode = _mapGraph.GetNode(childId);
+
+            if (!isNew && childNode?.Snapshot != null)
+            {
+                // ── Revisit: restore without any LLM calls ──────────────────
+                gen.OnMapReady -= OnMapReadyNarrate;
+                gen.OnMapReady -= OnSubMapReady;
+                gen.RestoreFromSnapshot(childNode.Snapshot);
+                int cx = gen.width / 2, cy = gen.height / 2;
+                cc?.MoveTo(cx, cy);
+                ChatUI.Instance?.AddSystemMessage("You recognise this place from before.");
+                return;
+            }
+
+            // ── New room: give LLM context about the parent area, then generate ──
+            if (!string.IsNullOrEmpty(parentContext))
+                gen.StartingContext = parentContext;
+
+            gen.OnMapReady -= OnMapReadyNarrate;
+            gen.OnMapReady -= OnSubMapReady;
+            gen.OnMapReady += OnSubMapReady;
+            gen.SkipDescriptionGeneration = false;
+            gen.GenerateMap(childTheme);
+        }
+
+        private async void OnSubMapReady()
+        {
+            MapGenerator.Instance.OnMapReady -= OnSubMapReady;
+
+            int cx = MapGenerator.Instance.width  / 2;
+            int cy = MapGenerator.Instance.height / 2;
+            MapCharacterController.Instance?.MoveTo(cx, cy);
+
+            if (LLMService.Instance != null && ChatUI.Instance != null)
+            {
+                string tileCtx = MapGenerator.Instance.GetTileContext(cx, cy);
+                string raw = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT,
+                    $"The adventurer enters: {MapGenerator.Instance.LastTheme}.\n\n{tileCtx}\n\n"
+                    + "Describe what they find, then suggest 3 actions. "
+                    + "The Exit tile leads back out.");
+                if (!string.IsNullOrEmpty(raw))
+                {
+                    string narrative = GMToolExecutor.ExtractNarrative(raw);
+                    if (!string.IsNullOrEmpty(narrative))
+                        ChatUI.Instance.AddDMMessage(narrative, useTypewriter: true);
+                    foreach (string r in GMToolExecutor.ExecuteActions(raw, playerCharacter))
+                        ChatUI.Instance.AddSystemMessage(r);
+                }
+            }
+
+            await SpawnMapEntitiesAsync();
+
+            // Save freshly generated sub-map into graph node for future revisits
+            var cc   = MapCharacterController.Instance;
+            var snap = MapGenerator.Instance.TakeSnapshot(cc?.GridX ?? cx, cc?.GridY ?? cy);
+            _mapGraph.SaveCurrentSnapshot(snap);
+        }
+
+        private void TryExitRoom()
+        {
+            if (!_mapGraph.CanGoBack)
+            {
+                ChatUI.Instance?.AddSystemMessage("There is no way back from here.");
+                return;
+            }
+
+            // Save current child map state (with player position) before leaving,
+            // so re-entering the same door later restores exactly where we were.
+            var cc = MapCharacterController.Instance;
+            var gen = MapGenerator.Instance;
+            if (gen != null)
+            {
+                var childSnap = gen.TakeSnapshot(cc?.GridX ?? 0, cc?.GridY ?? 0);
+                _mapGraph.SaveCurrentSnapshot(childSnap);
+            }
+
+            // Restore parent snapshot from the graph
+            _mapGraph.NavigateBack();
+            var parentNode = _mapGraph.CurrentNode;
+            if (parentNode?.Snapshot == null)
+            {
+                ChatUI.Instance?.AddSystemMessage("The way back has been lost.");
+                return;
+            }
+
+            MapEntityController.ClearAll();
+            MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
+            MapGenerator.Instance.OnMapReady -= OnSubMapReady;
+            MapGenerator.Instance.RestoreFromSnapshot(parentNode.Snapshot);
+            MapCharacterController.Instance?.MoveTo(parentNode.Snapshot.playerX, parentNode.Snapshot.playerY);
+            ChatUI.Instance?.AddSystemMessage("You step back out.");
+        }
+
+        // ── Entity sprite spawning ────────────────────────────────────────────
+
+        private async Task SpawnMapEntitiesAsync()
+        {
+            var gen = MapGenerator.Instance;
+            if (gen == null || gen.grid == null || LLMService.Instance == null) return;
+
+            // Collect all tiles that should get an entity token
+            var spawnList = new List<(int x, int y, TileType type)>();
+            for (int x = 0; x < gen.width; x++)
+            for (int y = 0; y < gen.height; y++)
+            {
+                var t = gen.grid[x, y].type;
+                if (t == TileType.EnemySpawn || t == TileType.NpcSpawn
+                    || t == TileType.House   || t == TileType.Inn
+                    || t == TileType.Market  || t == TileType.Fountain)
+                    spawnList.Add((x, y, t));
+            }
+
+            if (spawnList.Count == 0) return;
+
+            // Fire all entity generation tasks in parallel
+            var entityTasks = new List<Task>();
+            foreach (var (ex, ey, etype) in spawnList)
+            {
+                int cx = ex, cy = ey; // capture for lambda
+                TileType ctype = etype;
+                entityTasks.Add(SpawnSingleEntityAsync(gen, cx, cy, ctype));
+            }
+            await Task.WhenAll(entityTasks);
+        }
+
+        private async Task SpawnSingleEntityAsync(MapGenerator gen, int x, int y, TileType tileType)
+        {
+            bool isEnemy = tileType == TileType.EnemySpawn;
+
+            // Determine role & fallback name based on tile type
+            string role, fallbackName;
+            switch (tileType)
+            {
+                case TileType.EnemySpawn: role = "hostile monster";                      fallbackName = "Monster";   break;
+                case TileType.Inn:        role = "innkeeper or travelling guest";         fallbackName = "Innkeeper"; break;
+                case TileType.Market:     role = "merchant or market vendor";             fallbackName = "Merchant";  break;
+                case TileType.Fountain:   role = "street NPC near a fountain";           fallbackName = "Townsfolk"; break;
+                case TileType.House:      role = "resident or villager near their home"; fallbackName = "Villager";  break;
+                default:                  role = "friendly NPC";                          fallbackName = "Villager";  break;
+            }
+
+            // Ask LLM for a 2-4 word name
+            string nameRaw = await LLMService.Instance.SendPrompt(
+                "You are a D&D world builder. Reply with ONLY a 2-4 word creature or character name, no punctuation.",
+                $"In a {gen.LastTheme} setting, name one {role} that fits the environment.");
+            string entityName = string.IsNullOrEmpty(nameRaw) ? fallbackName : nameRaw.Trim();
+
+            if (ChatUI.Instance != null)
+                ChatUI.Instance.AddSystemMessage($"Generating sprite for {entityName}...");
+
+            string kind = isEnemy ? "fearsome monster" : "NPC character";
+            string prompt =
+                $"Square, 1:1 aspect ratio. Top-down RPG map token: {entityName}, {kind} "
+                + $"in a {gen.LastTheme} setting, viewed directly from above. "
+                + "Centered on a FULLY TRANSPARENT background — no floor, no tile, no ground. "
+                + "The entity is the only visible element. "
+                + "Match the exact art style, color palette of the reference tile. "
+                + "Flat overhead view, no border, no drop shadow.";
+
+            Texture2D tex = await LLMService.Instance.GenerateStyledTile(prompt, gen.StyleAnchor);
+            if (tex != null)
+                tex = SpriteBackgroundRemover.RemoveBackground(tex);
+
+            var go = new GameObject($"Entity_{entityName}_{x}_{y}");
+            go.AddComponent<SpriteRenderer>();
+            var entity = go.AddComponent<MapEntityController>();
+            entity.Initialize(
+                tex, entityName, x, y,
+                hp: isEnemy ? UnityEngine.Random.Range(8, 20) : 10,
+                ac: isEnemy ? UnityEngine.Random.Range(10, 14) : 10,
+                isEnemy: isEnemy);
+        }
+
         private async void HandlePlayerInput(string input)
         {
             Debug.Log($"[GameManager] Player input: {input}");
-
-            // ── Save-confirm intercept ────────────────────────────────────
-            if (_awaitingMapSaveConfirm)
-            {
-                _awaitingMapSaveConfirm = false;
-                string lower = input.ToLower().Trim();
-                if (lower.StartsWith("y") || lower == "save")
-                {
-                    SaveCurrentSlot();
-                    ChatUI.Instance?.AddSystemMessage("Adventure saved.");
-                }
-                else
-                {
-                    ChatUI.Instance?.AddSystemMessage("Continuing without saving.");
-                }
-                return;
-            }
 
             string lowerInput = input.ToLower().Trim();
 
@@ -646,7 +1057,27 @@ namespace DnD.Managers
                 bool moved = MapCharacterController.Instance?.TryMove(dx, dy) ?? false;
                 if (!moved && ChatUI.Instance != null)
                     ChatUI.Instance.AddSystemMessage("Something blocks your path.");
-                // Still fall through so the DM can narrate the attempt
+
+                // Check if the player stepped onto a Door or Exit tile
+                if (moved)
+                {
+                    var cc  = MapCharacterController.Instance;
+                    var gen = MapGenerator.Instance;
+                    if (cc != null && gen?.grid != null)
+                    {
+                        var tileType = gen.grid[cc.GridX, cc.GridY].type;
+                        if (tileType == TileType.Door)
+                        {
+                            await TryEnterRoom();
+                            return; // new map generates; stop processing this input
+                        }
+                        else if (tileType == TileType.Exit)
+                        {
+                            TryExitRoom();
+                            return;
+                        }
+                    }
+                }
             }
 
             // ── DM narration ──────────────────────────────────────────────
@@ -657,12 +1088,26 @@ namespace DnD.Managers
                 string pos = MapCharacterController.Instance != null
                     ? $" (at grid {MapCharacterController.Instance.GridX},{MapCharacterController.Instance.GridY})"
                     : "";
+                string tileCtx = "";
+                if (MapGenerator.Instance != null && MapCharacterController.Instance != null)
+                    tileCtx = "\n\nEnvironment:\n" + MapGenerator.Instance.GetTileContext(
+                        MapCharacterController.Instance.GridX,
+                        MapCharacterController.Instance.GridY);
                 string userPrompt =
-                    $"Campaign: {_campaignSeed}\nPlayer{pos} does: {input}\n" +
+                    $"Campaign: {_campaignSeed}\nPlayer{pos} does: {input}{tileCtx}\n" +
                     "Describe what happens, then suggest 3 possible next actions.";
-                string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
-                if (!string.IsNullOrEmpty(narration))
-                    ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
+
+                string rawResponse = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
+                if (!string.IsNullOrEmpty(rawResponse))
+                {
+                    string narrative = GMToolExecutor.ExtractNarrative(rawResponse);
+                    if (!string.IsNullOrEmpty(narrative))
+                        ChatUI.Instance.AddDMMessage(narrative, useTypewriter: true);
+
+                    var actionResults = GMToolExecutor.ExecuteActions(rawResponse, playerCharacter);
+                    foreach (string r in actionResults)
+                        ChatUI.Instance.AddSystemMessage(r);
+                }
             }
 
             if (command != null && command.CanExecute())
