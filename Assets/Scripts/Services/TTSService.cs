@@ -157,7 +157,7 @@ namespace DNDLLM.Services
 
                 if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
                 {
-                    Debug.LogError($"[TTSService] SSE error: {req.error} — {req.downloadHandler?.text}");
+                    Debug.LogError($"[TTSService] SSE error {req.responseCode}: {req.error}");
                     // Surface rate-limit to chat once per session.
                     if (req.responseCode == 429 && !_rateLimitWarned)
                     {
@@ -175,6 +175,8 @@ namespace DNDLLM.Services
                 }
 
                 if (useCache) AudioCache.Save("openrouter", voice, format, text, wav);
+                // Ensure we are back on Unity's main thread before touching AudioClip APIs.
+                await Task.Yield();
                 return WavDecoder.Decode(wav, "tts-live");
             }
         }
