@@ -312,7 +312,8 @@ namespace DnD.UI
             {
                 var live = DNDLLM.Services.TTSService.Instance;
                 if (live == null) return;
-                if (live.IsSpeaking) live.Stop();
+                // "■" means THIS bubble is currently playing; stop. Otherwise always start (PlayAsync handles interrupt).
+                if (tmp.text == "■") live.Stop();
                 else                 live.PlayAsync(snapshot);
             });
 
