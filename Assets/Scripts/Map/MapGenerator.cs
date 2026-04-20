@@ -88,31 +88,43 @@ namespace DNDLLM.Map
                             UpdateTileVisual(x, y, styleAnchor);
             }
 
-            // ── 4. Generate every tile individually with style anchor + cues ──
-            int total = width * height;
+            // ── 4. Generate one texture per unique tile type (not per tile) ──
+            // This gives a coherent look (all Floor tiles identical, all Wall tiles identical)
+            // and is far faster than generating every cell individually.
+            var uniqueTypes = new HashSet<TileType>();
+            for (int x = 0; x < width; x++)
+                for (int y = 0; y < height; y++)
+                    if (grid[x, y].type != TileType.Floor)
+                        uniqueTypes.Add(grid[x, y].type);
+
+            var typeTextures = new Dictionary<TileType, Texture2D>();
+            typeTextures[TileType.Floor] = styleAnchor; // floor reuses the style anchor
+
+            int total = uniqueTypes.Count;
             int done  = 0;
 
             if (DnD.UI.ChatUI.Instance != null)
-                DnD.UI.ChatUI.Instance.AddSystemMessage($"Generating {total} tiles...");
+                DnD.UI.ChatUI.Instance.AddSystemMessage($"Generating {total} tile types...");
 
+            foreach (var tileType in uniqueTypes)
+            {
+                string prompt = BuildTilePrompt(theme, tileType, width / 2, height / 2);
+                Texture2D tex = await LLMService.Instance.GenerateStyledTile(prompt, styleAnchor);
+                typeTextures[tileType] = tex ?? Texture2D.whiteTexture;
+                done++;
+                if (DnD.UI.ChatUI.Instance != null)
+                    DnD.UI.ChatUI.Instance.AddSystemMessage($"Tiles: {done}/{total}");
+            }
+
+            // Apply type textures to all cells
             for (int x = 0; x < width; x++)
             {
                 for (int y = 0; y < height; y++)
                 {
-                    string prompt = BuildTilePrompt(theme, grid[x, y].type, x, y);
-                    Texture2D tex = await LLMService.Instance.GenerateStyledTile(prompt, styleAnchor);
-
-                    if (tex != null)
+                    if (typeTextures.TryGetValue(grid[x, y].type, out Texture2D tex))
                     {
                         grid[x, y].visual = tex;
                         UpdateTileVisual(x, y, tex);
-                    }
-
-                    done++;
-                    if (done % 5 == 0 || done == total)
-                    {
-                        if (DnD.UI.ChatUI.Instance != null)
-                            DnD.UI.ChatUI.Instance.AddSystemMessage($"Tiles: {done}/{total}");
                     }
                 }
             }
