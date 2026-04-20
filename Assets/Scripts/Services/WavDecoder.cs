@@ -24,9 +24,11 @@ namespace DNDLLM.Services
                 string id = "" + (char)wav[pos] + (char)wav[pos+1] + (char)wav[pos+2] + (char)wav[pos+3];
                 int size = BitConverter.ToInt32(wav, pos + 4);
                 int body = pos + 8;
+                if (size < 0 || body + size > wav.Length) return Fail("truncated chunk");
 
                 if (id == "fmt ")
                 {
+                    if (size < 16) return Fail("fmt chunk too small");
                     // ushort audioFormat @ body+0
                     channels       = BitConverter.ToUInt16(wav, body + 2);
                     sampleRate     = BitConverter.ToInt32(wav, body + 4);
