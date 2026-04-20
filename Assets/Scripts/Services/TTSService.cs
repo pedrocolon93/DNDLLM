@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -110,10 +111,82 @@ namespace DNDLLM.Services
             return await SynthesizeRemote(text, ct);
         }
 
-        private Task<AudioClip> SynthesizeRemote(string text, CancellationToken ct)
+        private async Task<AudioClip> SynthesizeRemote(string text, CancellationToken ct)
         {
-            Debug.LogWarning("[TTSService] SynthesizeRemote not yet implemented.");
-            return Task.FromResult<AudioClip>(null);
+            var llm = LLMService.Instance;
+            if (llm == null || string.IsNullOrEmpty(llm.ApiKey))
+            {
+                Debug.LogWarning("[TTSService] No LLMService / API key — TTS disabled this session.");
+                enabled_ = false;
+                return null;
+            }
+
+            // Build the request JSON by hand — JsonUtility cannot emit nested objects cleanly here.
+            string escapedText  = EscapeJson("Narrate: " + text);
+            string escapedModel = EscapeJson(model);
+            string escapedVoice = EscapeJson(voice);
+            string escapedFmt   = EscapeJson(format);
+
+            string requestJson =
+                "{\"model\":\"" + escapedModel + "\"," +
+                "\"stream\":true," +
+                "\"modalities\":[\"text\",\"audio\"]," +
+                "\"audio\":{\"voice\":\"" + escapedVoice + "\",\"format\":\"" + escapedFmt + "\"}," +
+                "\"messages\":[{\"role\":\"user\",\"content\":\"" + escapedText + "\"}]}";
+
+            string url = "https://openrouter.ai/api/v1/chat/completions";
+
+            var handler = new AudioStreamDownloadHandler();
+            using (var req = new UnityEngine.Networking.UnityWebRequest(url, "POST"))
+            {
+                byte[] body = Encoding.UTF8.GetBytes(requestJson);
+                req.uploadHandler   = new UnityEngine.Networking.UploadHandlerRaw(body);
+                req.downloadHandler = handler;
+                req.SetRequestHeader("Content-Type",  "application/json");
+                req.SetRequestHeader("Accept",        "text/event-stream");
+                req.SetRequestHeader("Authorization", "Bearer " + llm.ApiKey);
+                req.SetRequestHeader("HTTP-Referer",  "https://github.com/google-deepmind/antigravity");
+                req.SetRequestHeader("X-Title",       "DNDLLM");
+
+                var op = req.SendWebRequest();
+                while (!op.isDone)
+                {
+                    if (ct.IsCancellationRequested) { req.Abort(); return null; }
+                    await Task.Yield();
+                }
+
+                if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"[TTSService] SSE error: {req.error} — {req.downloadHandler?.text}");
+                    // Surface rate-limit to chat once per session.
+                    if (req.responseCode == 429 && !_rateLimitWarned)
+                    {
+                        _rateLimitWarned = true;
+                        DnD.UI.ChatUI.Instance?.AddSystemMessage("TTS rate-limited — playback skipped.");
+                    }
+                    return null;
+                }
+
+                byte[] wav = await handler.Completion.Task;
+                if (wav == null || wav.Length == 0)
+                {
+                    Debug.LogWarning("[TTSService] Stream yielded zero audio bytes.");
+                    return null;
+                }
+
+                if (useCache) AudioCache.Save("openrouter", voice, format, text, wav);
+                return WavDecoder.Decode(wav, "tts-live");
+            }
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\")
+                    .Replace("\"", "\\\"")
+                    .Replace("\n", "\\n")
+                    .Replace("\r", "\\r")
+                    .Replace("\t", "\\t");
         }
     }
 }
