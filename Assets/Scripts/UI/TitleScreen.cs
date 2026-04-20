@@ -74,6 +74,7 @@ namespace DnD.UI
                         var oldTex = slotPortraits[i].texture;
                         if (oldTex != null) UnityEngine.Object.Destroy(oldTex);
                         slotPortraits[i].texture = portrait;
+                        slotPortraits[i].color   = portrait != null ? UnityEngine.Color.white : UnityEngine.Color.clear;
                     }
                 }
                 else
@@ -95,6 +96,7 @@ namespace DnD.UI
                         var oldTex = slotPortraits[i].texture;
                         if (oldTex != null) UnityEngine.Object.Destroy(oldTex);
                         slotPortraits[i].texture = null;
+                        slotPortraits[i].color   = UnityEngine.Color.clear;
                     }
                 }
 

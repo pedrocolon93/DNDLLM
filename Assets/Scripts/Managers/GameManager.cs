@@ -286,7 +286,7 @@ namespace DnD.Managers
         private void SaveCurrentSlot(UnityEngine.Texture2D portrait = null)
         {
             if (playerCharacter == null) return;
-            if (string.IsNullOrEmpty(playerCharacter.characterName) || playerCharacter.characterName == "Adventurer") return;
+            if (string.IsNullOrEmpty(playerCharacter.characterName)) return;
 
             var saveData = new SaveData
             {
@@ -381,10 +381,15 @@ namespace DnD.Managers
                 ChatUI.Instance.AddSystemMessage("--- Adventure resumed ---");
             }
 
+            GameState targetState = GameState.Exploration;
             if (System.Enum.TryParse<GameState>(data.gameState, out var savedState))
-                ChangeState(savedState);
-            else
-                ChangeState(GameState.Exploration);
+            {
+                // Only restore states we can safely resume — combat/inventory cannot be reconstructed
+                targetState = (savedState == GameState.Exploration || savedState == GameState.MainMenu)
+                              ? savedState
+                              : GameState.Exploration;
+            }
+            ChangeState(targetState);
         }
 
         private void StartExploration()
