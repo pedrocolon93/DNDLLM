@@ -159,6 +159,12 @@ namespace DnD.Managers
             Debug.Log($"[GameManager] State: {currentState} -> {newState}");
             currentState = newState;
 
+            // Hide popups that must not linger across state changes
+            if (newState != GameState.CharacterCreation && characterPopup != null)
+                characterPopup.gameObject.SetActive(false);
+            if (newState != GameState.MainMenu && titleScreen != null)
+                titleScreen.gameObject.SetActive(false);
+
             switch (newState)
             {
                 case GameState.MainMenu:
@@ -385,18 +391,23 @@ namespace DnD.Managers
                 ChatUI.Instance.AddSystemMessage("--- Adventure resumed ---");
             }
 
-            // Always go to Exploration on load — MainMenu would just re-show the title screen
+            // Always go to Exploration on load; flag so StartExploration skips the "begins" banner
+            _isResumingLoad = true;
             ChangeState(GameState.Exploration);
         }
 
+        private bool _isResumingLoad = false;
+
         private void StartExploration()
         {
-            // Generate the map
             if (MapGenerator.Instance != null)
                 MapGenerator.Instance.GenerateMap("dungeon");
 
             if (ChatUI.Instance == null) return;
-            ChatUI.Instance.AddSystemMessage("=== YOUR ADVENTURE BEGINS ===");
+            // Don't add "ADVENTURE BEGINS" when we're resuming a loaded save
+            if (!_isResumingLoad)
+                ChatUI.Instance.AddSystemMessage("=== YOUR ADVENTURE BEGINS ===");
+            _isResumingLoad = false;
         }
 
         private async void HandlePlayerInput(string input)
