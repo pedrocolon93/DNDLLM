@@ -421,6 +421,13 @@ namespace DnD.Managers
 
         private bool _isResumingLoad = false;
 
+        private const string DM_SYSTEM_PROMPT =
+            "You are an expert Dungeon Master for a D&D 5e adventure. " +
+            "Write vivid, immersive descriptions in 2-4 sentences. " +
+            "Always end your response with exactly 3 suggested actions for the player, " +
+            "each on its own line prefixed with '► '. Keep suggestions short (5-8 words each).";
+
+
         private void StartExploration()
         {
             if (!_isResumingLoad && ChatUI.Instance != null)
@@ -439,12 +446,11 @@ namespace DnD.Managers
         private async void OnMapReadyNarrate()
         {
             MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
-            if (ChatUI.Instance == null) return;
+            if (ChatUI.Instance == null || LLMService.Instance == null) return;
             string seed = string.IsNullOrEmpty(_campaignSeed) ? "a mysterious dungeon" : _campaignSeed;
-            string prompt = $"You are the Dungeon Master. The player has just entered: {seed}. "
-                          + "Describe the scene in 2-3 evocative sentences. Set the mood.";
-            ChatUI.Instance.AddSystemMessage("The Dungeon Master speaks...");
-            string narration = await dungeonMaster.NarrateActionAsync("", prompt);
+            string userPrompt = $"The adventurer enters: {seed}. Describe what they see and sense as they arrive, then suggest 3 possible first actions.";
+            // Use LLMService directly — avoids double-display from dungeonMaster.OnDMResponse event
+            string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
             if (!string.IsNullOrEmpty(narration))
                 ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
         }
@@ -540,28 +546,23 @@ namespace DnD.Managers
 
         private async Task HandleExplorationInput(string input)
         {
-            // Parse command
             IGameCommand command = await commandParser.ParseCommandAsync(input, playerCharacter);
 
-            // Narrate the action
-            string narration = await dungeonMaster.NarrateActionAsync(input);
-
-            // Execute command if valid
-            if (command != null && command.CanExecute())
+            // Narrate via LLMService (real API) instead of dungeonMaster (MockLLM) to avoid duplicate events
+            if (LLMService.Instance != null && ChatUI.Instance != null)
             {
+                string userPrompt = $"Campaign: {_campaignSeed}\nPlayer does: {input}\n" +
+                                    "Describe what happens, then suggest 3 possible next actions.";
+                string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
+                if (!string.IsNullOrEmpty(narration))
+                    ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
+            }
+
+            if (command != null && command.CanExecute())
                 command.Execute();
 
-                if (ChatUI.Instance != null)
-                {
-                    ChatUI.Instance.AddSystemMessage($"[{command.CommandName}] executed");
-                }
-            }
-
-            // Check for combat trigger (simplified)
             if (input.ToLower().Contains("attack") || input.ToLower().Contains("fight"))
-            {
                 await StartRandomEncounter();
-            }
         }
 
         private async Task HandleCombatInput(string input)

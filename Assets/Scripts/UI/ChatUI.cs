@@ -135,23 +135,26 @@ namespace DnD.UI
             var msgGO = new GameObject($"Msg_{type}", typeof(RectTransform));
             msgGO.transform.SetParent(contentPanel, false);
 
-            // Size fitter so the bubble grows with text
+            // ContentSizeFitter drives height; VLG provides padding so TMP (a layout child) is measured
             var csf = msgGO.AddComponent<ContentSizeFitter>();
             csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             var le = msgGO.AddComponent<LayoutElement>();
             le.minHeight = 24;
 
-            // Bubble background
             var bg = msgGO.AddComponent<Image>();
 
-            // Text child fills the bubble with padding
+            var vlg = msgGO.AddComponent<VerticalLayoutGroup>();
+            vlg.padding = new RectOffset(10, 10, 6, 6);
+            vlg.childForceExpandWidth  = true;
+            vlg.childForceExpandHeight = false;
+            vlg.childControlWidth  = true;
+            vlg.childControlHeight = true;
+            vlg.spacing = 0;
+
+            // Text child — no manual RectTransform; VLG controls sizing
             var textGO = new GameObject("Text");
             textGO.transform.SetParent(msgGO.transform, false);
-            var textRT = textGO.AddComponent<RectTransform>();
-            textRT.anchorMin = Vector2.zero;
-            textRT.anchorMax = Vector2.one;
-            textRT.offsetMin = new Vector2(10, 6);
-            textRT.offsetMax = new Vector2(-10, -6);
+            textGO.AddComponent<RectTransform>();
 
             var tmp = textGO.AddComponent<TextMeshProUGUI>();
             tmp.enableWordWrapping = true;
@@ -197,13 +200,17 @@ namespace DnD.UI
             var bg = msgGO.AddComponent<Image>();
             bg.color = UITheme.BackgroundDM;
 
+            var vlg = msgGO.AddComponent<VerticalLayoutGroup>();
+            vlg.padding = new RectOffset(10, 10, 6, 6);
+            vlg.childForceExpandWidth  = true;
+            vlg.childForceExpandHeight = false;
+            vlg.childControlWidth  = true;
+            vlg.childControlHeight = true;
+            vlg.spacing = 0;
+
             var textGO = new GameObject("Text");
             textGO.transform.SetParent(msgGO.transform, false);
-            var textRT = textGO.AddComponent<RectTransform>();
-            textRT.anchorMin = Vector2.zero;
-            textRT.anchorMax = Vector2.one;
-            textRT.offsetMin = new Vector2(10, 6);
-            textRT.offsetMax = new Vector2(-10, -6);
+            textGO.AddComponent<RectTransform>();
 
             var tmp = textGO.AddComponent<TextMeshProUGUI>();
             tmp.enableWordWrapping = true;
