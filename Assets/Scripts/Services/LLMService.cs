@@ -4,15 +4,27 @@ using System.Collections.Generic;
 
 namespace DNDLLM.Services
 {
+    public enum LLMProvider { OpenRouter, Ollama }
+
     public class LLMService : MonoBehaviour
     {
         public static LLMService Instance { get; private set; }
 
+        [Header("Provider")]
+        [SerializeField] private LLMProvider provider = LLMProvider.OpenRouter;
+        [SerializeField] private bool useMock = false;
+
+        [Header("OpenRouter")]
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
-        [SerializeField] private bool useMock = true;
-        [SerializeField] private string model = "openai/gpt-3.5-turbo";
-        [SerializeField] private string imageModel = "openai/dall-e-3"; 
-        [SerializeField] private bool useCache = true; 
+        [SerializeField] private string model = "openai/gpt-4o-mini";
+        [SerializeField] private string imageModel = "openai/dall-e-3";
+
+        [Header("Ollama  (text only — images still use OpenRouter)")]
+        [SerializeField] private string ollamaBaseUrl = "http://localhost:11434";
+        [SerializeField] private string ollamaModel = "llama3.2";
+
+        [Header("Cache")]
+        [SerializeField] private bool useCache = true;
 
         private void Awake()
         {
@@ -92,50 +104,63 @@ namespace DNDLLM.Services
         {
             if (useMock)
             {
-                await Task.Delay(500); 
-                return $"[MOCK LLM RESPONSE] Based on '{userPrompt}' with context '{systemPrompt}'.";
+                await Task.Delay(500);
+                return $"[MOCK] {userPrompt}";
             }
 
-            string url = "https://openrouter.ai/api/v1/chat/completions";
-
-            var requestData = new OpenRouterRequest
+            var messages = new List<Message>
             {
-                model = this.model,
-                messages = new List<Message>
-                {
-                    new Message { role = "system", content = systemPrompt },
-                    new Message { role = "user", content = userPrompt }
-                }
+                new Message { role = "system", content = systemPrompt },
+                new Message { role = "user",   content = userPrompt }
             };
 
+            if (provider == LLMProvider.Ollama)
+            {
+                string url = $"{ollamaBaseUrl.TrimEnd('/')}/v1/chat/completions";
+                return await SendChatCompletionAsync(url, ollamaModel, messages, authToken: null);
+            }
+            else
+            {
+                return await SendChatCompletionAsync(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    model, messages, authToken: apiKey);
+            }
+        }
+
+        // Shared chat-completion helper — used by both OpenRouter and Ollama paths
+        private async Task<string> SendChatCompletionAsync(
+            string url, string modelName, List<Message> messages, string authToken)
+        {
+            var requestData = new OpenRouterRequest { model = modelName, messages = messages };
             string jsonData = JsonUtility.ToJson(requestData);
 
-            using (UnityEngine.Networking.UnityWebRequest request = new UnityEngine.Networking.UnityWebRequest(url, "POST"))
+            using (var request = new UnityEngine.Networking.UnityWebRequest(url, "POST"))
             {
                 byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
-                request.uploadHandler = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
+                request.uploadHandler   = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
                 request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
                 request.SetRequestHeader("Content-Type", "application/json");
-                request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
-                request.SetRequestHeader("HTTP-Referer", "https://github.com/google-deepmind/antigravity"); 
-                request.SetRequestHeader("X-Title", "DNDLLM");
+
+                if (!string.IsNullOrEmpty(authToken))
+                {
+                    request.SetRequestHeader("Authorization", $"Bearer {authToken}");
+                    request.SetRequestHeader("HTTP-Referer", "https://github.com/google-deepmind/antigravity");
+                    request.SetRequestHeader("X-Title", "DNDLLM");
+                }
 
                 var operation = request.SendWebRequest();
-
                 while (!operation.isDone) await Task.Yield();
 
                 if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
                 {
-                    Debug.Log($"OpenRouter Response: {request.downloadHandler.text}");
+                    Debug.Log($"[LLMService] Chat response: {request.downloadHandler.text}");
                     var responseData = JsonUtility.FromJson<OpenRouterResponse>(request.downloadHandler.text);
-                    if (responseData != null && responseData.choices != null && responseData.choices.Count > 0)
-                    {
+                    if (responseData?.choices?.Count > 0)
                         return responseData.choices[0].message.content;
-                    }
                 }
                 else
                 {
-                    Debug.LogError($"OpenRouter Error: {request.error} - {request.downloadHandler.text}");
+                    Debug.LogError($"[LLMService] Chat error ({url}): {request.error} — {request.downloadHandler.text}");
                 }
             }
 
