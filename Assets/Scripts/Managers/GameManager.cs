@@ -225,7 +225,6 @@ namespace DnD.Managers
             {
                 var (data, _) = DNDLLM.Services.SaveSystem.Load(i);
                 if (data == null) { slot = i; break; }
-                if (i == 2) slot = 0; // all full — overwrite slot 0
             }
             _currentSlotIndex = slot;
 
@@ -287,6 +286,7 @@ namespace DnD.Managers
         private void SaveCurrentSlot(UnityEngine.Texture2D portrait = null)
         {
             if (playerCharacter == null) return;
+            if (string.IsNullOrEmpty(playerCharacter.characterName) || playerCharacter.characterName == "Adventurer") return;
 
             var saveData = new SaveData
             {
