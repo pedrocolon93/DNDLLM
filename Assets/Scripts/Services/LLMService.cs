@@ -16,6 +16,7 @@ namespace DNDLLM.Services
 
         [Header("OpenRouter")]
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
+        public string ApiKey => apiKey;
         [SerializeField] private string model = "openai/gpt-4o-mini";
         [SerializeField] private string imageModel = "openai/dall-e-3";
 
