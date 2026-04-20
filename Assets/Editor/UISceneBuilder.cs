@@ -255,6 +255,17 @@ public static class UISceneBuilder
         Debug.Log("[UISceneBuilder] Canvas rebuilt. Press Ctrl+S to save the scene.");
     }
 
+    [MenuItem("DnD/Setup Scene (All Steps)")]
+    public static void SetupSceneAll()
+    {
+        RebuildCanvas();
+        SetupGameManager();
+        BuildTitleScreen();
+        BuildCharacterPopup();
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        Debug.Log("[UISceneBuilder] Full scene setup complete. Press Ctrl+S to save.");
+    }
+
     [MenuItem("DnD/Setup Game Manager")]
     public static void SetupGameManager()
     {
