@@ -13,6 +13,12 @@ namespace DNDLLM.Map
 
         public event System.Action OnMapReady;
 
+        /// <summary>The floor tile used as the visual style reference for all other tile types.</summary>
+        public Texture2D StyleAnchor { get; private set; }
+
+        /// <summary>Returns the world-space centre of the given grid cell.</summary>
+        public Vector3 GetTileWorldPos(int x, int y) => new Vector3(x * cellSize, 0f, y * cellSize);
+
         [Header("Map Settings")]
         public int width  = 7;
         public int height = 7;
@@ -71,7 +77,7 @@ namespace DNDLLM.Map
             if (DnD.UI.ChatUI.Instance != null)
                 DnD.UI.ChatUI.Instance.AddSystemMessage("Generating style anchor...");
 
-            string anchorPrompt = $"Top-down 2D RPG tile: {theme} stone floor, seamlessly tileable. Flat overhead view, painterly game art. No borders, no perspective, no drop shadows.";
+            string anchorPrompt = $"Square, 1:1 aspect ratio. Top-down 2D RPG tile: {theme} stone floor, seamlessly tileable. Flat overhead view, painterly game art. No borders, no perspective, no drop shadows.";
             Texture2D styleAnchor = await LLMService.Instance.GenerateImage(anchorPrompt);
 
             if (styleAnchor == null)
@@ -79,7 +85,8 @@ namespace DNDLLM.Map
                 Debug.LogWarning("[MapGenerator] Style anchor failed; using white fallback.");
                 styleAnchor = Texture2D.whiteTexture;
             }
-            else
+            StyleAnchor = styleAnchor;
+            if (styleAnchor != Texture2D.whiteTexture)
             {
                 // Show anchor on all floor tiles while the rest generates
                 for (int x = 0; x < width; x++)
@@ -196,7 +203,7 @@ namespace DNDLLM.Map
             }
 
             string connectivity = GetConnectivityCue(x, y);
-            return $"Top-down 2D RPG tile: {typeDesc}. Position: {connectivity}. "
+            return $"Square, 1:1 aspect ratio. Top-down 2D RPG tile: {typeDesc}. Position: {connectivity}. "
                  + "Match the exact art style, color palette, and line weight of the reference image. "
                  + "Seamless edges, flat overhead view, no perspective, no drop shadows, no borders.";
         }

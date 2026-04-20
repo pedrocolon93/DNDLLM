@@ -39,6 +39,13 @@ namespace DnD.Managers
 
         private int _currentSlotIndex = 0;
         private string _campaignSeed = "";
+        private string _appearanceDescription = "";
+        private Texture2D _characterPortrait;
+
+        // Set true after a new-game character creation so we prompt to save after map loads
+        private bool _askSaveAfterMap = false;
+        // Set true while waiting for the player to type "yes" or "no" to the save prompt
+        private bool _awaitingMapSaveConfirm = false;
 
         private DungeonMaster dungeonMaster;
         private CommandParser commandParser;
@@ -285,6 +292,10 @@ namespace DnD.Managers
 
         private void OnCharacterCreationComplete(CharacterCreationData data)
         {
+            _characterPortrait       = data.portrait;
+            _appearanceDescription   = data.appearanceDescription ?? "";
+            _askSaveAfterMap         = true;  // new game: prompt to save after map loads
+
             if (playerCharacter == null)
             {
                 var go = new GameObject("Player");
@@ -324,6 +335,7 @@ namespace DnD.Managers
             var saveData = new SaveData
             {
                 characterName         = playerCharacter.characterName,
+                appearanceDescription = _appearanceDescription,
                 raceName              = playerCharacter.race.ToString(),
                 className             = playerCharacter.characterClass != null
                                             ? playerCharacter.characterClass.className.ToString()
@@ -360,8 +372,11 @@ namespace DnD.Managers
                 return;
             }
 
-            _currentSlotIndex = slotIndex;
-            _campaignSeed     = data.campaignSeed ?? "";
+            _currentSlotIndex        = slotIndex;
+            _campaignSeed            = data.campaignSeed ?? "";
+            _appearanceDescription   = data.appearanceDescription ?? "";
+            _characterPortrait       = portrait;
+            _askSaveAfterMap         = false;  // loading a save — no save prompt needed
 
             if (playerCharacter == null)
             {
@@ -446,18 +461,97 @@ namespace DnD.Managers
         private async void OnMapReadyNarrate()
         {
             MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
-            if (ChatUI.Instance == null || LLMService.Instance == null) return;
-            string seed = string.IsNullOrEmpty(_campaignSeed) ? "a mysterious dungeon" : _campaignSeed;
-            string userPrompt = $"The adventurer enters: {seed}. Describe what they see and sense as they arrive, then suggest 3 possible first actions.";
-            // Use LLMService directly — avoids double-display from dungeonMaster.OnDMResponse event
-            string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
-            if (!string.IsNullOrEmpty(narration))
-                ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
+            if (LLMService.Instance == null) return;
+
+            // ── 1. DM opening narration ───────────────────────────────────
+            if (ChatUI.Instance != null)
+            {
+                string seed = string.IsNullOrEmpty(_campaignSeed) ? "a mysterious dungeon" : _campaignSeed;
+                string userPrompt =
+                    $"The adventurer enters: {seed}. " +
+                    "Describe what they see and sense as they arrive, then suggest 3 possible first actions.";
+                string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
+                if (!string.IsNullOrEmpty(narration))
+                    ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
+            }
+
+            // ── 2. Generate and place character token on the map ─────────
+            await SpawnCharacterOnMapAsync();
+
+            // ── 3. Prompt to save (new games only) ───────────────────────
+            if (_askSaveAfterMap && ChatUI.Instance != null)
+            {
+                _askSaveAfterMap = false;
+                ChatUI.Instance.AddSystemMessage("Would you like to save your adventure? (type yes / no)");
+                _awaitingMapSaveConfirm = true;
+            }
+        }
+
+        private async Task SpawnCharacterOnMapAsync()
+        {
+            if (MapGenerator.Instance == null) return;
+
+            Texture2D charTex = null;
+
+            // Generate a top-down character token styled to match the map's tiles
+            if (LLMService.Instance != null && MapGenerator.Instance.StyleAnchor != null
+                && MapGenerator.Instance.StyleAnchor != Texture2D.whiteTexture)
+            {
+                string race       = playerCharacter != null ? playerCharacter.race.ToString() : "Human";
+                string cls        = playerCharacter?.characterClass != null
+                                    ? playerCharacter.characterClass.className.ToString() : "Adventurer";
+                string appearance = string.IsNullOrEmpty(_appearanceDescription)
+                                    ? "" : $" {_appearanceDescription}.";
+
+                string charPrompt =
+                    $"Square, 1:1 aspect ratio. Top-down RPG map token: {race} {cls} adventurer, " +
+                    $"viewed directly from above.{appearance} " +
+                    "Small heroic figure centered on tile. Match the exact art style, " +
+                    "color palette, and brushwork of the reference tile. " +
+                    "Flat overhead view, no border, no drop shadow.";
+
+                charTex = await LLMService.Instance.GenerateStyledTile(
+                    charPrompt, MapGenerator.Instance.StyleAnchor);
+                Debug.Log($"[GameManager] Character tile generated: {(charTex != null ? "OK" : "failed")}");
+            }
+
+            // Fall back to the character portrait if generation failed
+            if (charTex == null) charTex = _characterPortrait;
+
+            // Starting cell: just inside the south entrance (bottom door)
+            int startX = MapGenerator.Instance.width  / 2;
+            int startY = 1; // row above the bottom wall
+
+            // Create the controller if it doesn't exist yet
+            if (MapCharacterController.Instance == null)
+            {
+                var go = new GameObject("MapCharacter");
+                go.AddComponent<MapCharacterController>();
+            }
+
+            MapCharacterController.Instance?.Initialize(charTex, startX, startY);
         }
 
         private async void HandlePlayerInput(string input)
         {
             Debug.Log($"[GameManager] Player input: {input}");
+
+            // ── Save-confirm intercept ────────────────────────────────────
+            if (_awaitingMapSaveConfirm)
+            {
+                _awaitingMapSaveConfirm = false;
+                string lower = input.ToLower().Trim();
+                if (lower.StartsWith("y") || lower == "save")
+                {
+                    SaveCurrentSlot();
+                    ChatUI.Instance?.AddSystemMessage("Adventure saved.");
+                }
+                else
+                {
+                    ChatUI.Instance?.AddSystemMessage("Continuing without saving.");
+                }
+                return;
+            }
 
             string lowerInput = input.ToLower().Trim();
 
@@ -546,13 +640,26 @@ namespace DnD.Managers
 
         private async Task HandleExplorationInput(string input)
         {
+            // ── Movement ─────────────────────────────────────────────────
+            if (TryParseMovement(input, out int dx, out int dy))
+            {
+                bool moved = MapCharacterController.Instance?.TryMove(dx, dy) ?? false;
+                if (!moved && ChatUI.Instance != null)
+                    ChatUI.Instance.AddSystemMessage("Something blocks your path.");
+                // Still fall through so the DM can narrate the attempt
+            }
+
+            // ── DM narration ──────────────────────────────────────────────
             IGameCommand command = await commandParser.ParseCommandAsync(input, playerCharacter);
 
-            // Narrate via LLMService (real API) instead of dungeonMaster (MockLLM) to avoid duplicate events
             if (LLMService.Instance != null && ChatUI.Instance != null)
             {
-                string userPrompt = $"Campaign: {_campaignSeed}\nPlayer does: {input}\n" +
-                                    "Describe what happens, then suggest 3 possible next actions.";
+                string pos = MapCharacterController.Instance != null
+                    ? $" (at grid {MapCharacterController.Instance.GridX},{MapCharacterController.Instance.GridY})"
+                    : "";
+                string userPrompt =
+                    $"Campaign: {_campaignSeed}\nPlayer{pos} does: {input}\n" +
+                    "Describe what happens, then suggest 3 possible next actions.";
                 string narration = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
                 if (!string.IsNullOrEmpty(narration))
                     ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
@@ -563,6 +670,39 @@ namespace DnD.Managers
 
             if (input.ToLower().Contains("attack") || input.ToLower().Contains("fight"))
                 await StartRandomEncounter();
+        }
+
+        /// <summary>
+        /// Parses a player input string for cardinal/intercardinal movement intent.
+        /// Returns true and sets dx/dy if a movement direction was found.
+        /// </summary>
+        private static bool TryParseMovement(string input, out int dx, out int dy)
+        {
+            dx = dy = 0;
+            string s = input.ToLower().Trim();
+
+            // Pure direction words / abbreviations
+            if (s == "n" || s == "north")                    { dy =  1;             return true; }
+            if (s == "s" || s == "south")                    { dy = -1;             return true; }
+            if (s == "e" || s == "east")                     { dx =  1;             return true; }
+            if (s == "w" || s == "west")                     { dx = -1;             return true; }
+            if (s == "ne" || s == "northeast")               { dx =  1; dy =  1;    return true; }
+            if (s == "nw" || s == "northwest")               { dx = -1; dy =  1;    return true; }
+            if (s == "se" || s == "southeast")               { dx =  1; dy = -1;    return true; }
+            if (s == "sw" || s == "southwest")               { dx = -1; dy = -1;    return true; }
+
+            // Phrase patterns: "move north", "go west", "walk northeast", etc.
+            bool isPhrase = s.StartsWith("move ")  || s.StartsWith("go ")    ||
+                            s.StartsWith("walk ")  || s.StartsWith("run ")   ||
+                            s.StartsWith("head ")  || s.StartsWith("travel ");
+            if (!isPhrase) return false;
+
+            if (s.Contains("north")) dy += 1;
+            if (s.Contains("south")) dy -= 1;
+            if (s.Contains("east"))  dx += 1;
+            if (s.Contains("west"))  dx -= 1;
+
+            return dx != 0 || dy != 0;
         }
 
         private async Task HandleCombatInput(string input)
