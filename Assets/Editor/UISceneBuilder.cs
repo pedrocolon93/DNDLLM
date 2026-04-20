@@ -523,7 +523,8 @@ public static class UISceneBuilder
 
         // Header
         var headerGO = MakeGO("Header", panelGO.transform);
-        headerGO.AddComponent<LayoutElement>().preferredHeight = 44f;
+        var headerLE = headerGO.AddComponent<LayoutElement>();
+        headerLE.minHeight = 44f; headerLE.preferredHeight = 44f; headerLE.flexibleHeight = 0f;
         headerGO.AddComponent<Image>().color = new Color32(0x12, 0x0C, 0x03, 0xFF);
         var headerTextGO = MakeGO("Text", headerGO.transform);
         var hRT = headerTextGO.GetComponent<RectTransform>();
@@ -536,13 +537,14 @@ public static class UISceneBuilder
         hTMP.alignment = TextAlignmentOptions.Center;
         hTMP.characterSpacing = 1.5f;
 
-        // Step indicator row (5 bars)
+        // Step indicator row (5 thin bars) — hidden on mode-select/quick-create panels
         var barRowGO = MakeGO("StepIndicator", panelGO.transform);
-        barRowGO.AddComponent<LayoutElement>().preferredHeight = 10f;
+        var barRowLE = barRowGO.AddComponent<LayoutElement>();
+        barRowLE.minHeight = 10f; barRowLE.preferredHeight = 10f; barRowLE.flexibleHeight = 0f;
         barRowGO.AddComponent<Image>().color = UITheme.BackgroundMid;
         var barHLG = barRowGO.AddComponent<HorizontalLayoutGroup>();
-        barHLG.padding  = new RectOffset(16, 16, 3, 3);
-        barHLG.spacing  = 4f;
+        barHLG.padding  = new RectOffset(16, 16, 2, 2);
+        barHLG.spacing  = 6f;
         barHLG.childForceExpandHeight = true;
         barHLG.childForceExpandWidth  = true;
         barHLG.childControlHeight = true;
@@ -557,14 +559,15 @@ public static class UISceneBuilder
 
         // Step label — Image (bg) on outer GO, TextMeshProUGUI on child GO
         var stepLabelGO = MakeGO("StepLabel", panelGO.transform);
-        stepLabelGO.AddComponent<LayoutElement>().preferredHeight = 26f;
+        var stepLabelLE = stepLabelGO.AddComponent<LayoutElement>();
+        stepLabelLE.minHeight = 24f; stepLabelLE.preferredHeight = 24f; stepLabelLE.flexibleHeight = 0f;
         stepLabelGO.AddComponent<Image>().color = UITheme.BackgroundMid;
         var stepLabelTextGO = MakeGO("Text", stepLabelGO.transform);
         var slRT = stepLabelTextGO.GetComponent<RectTransform>();
         slRT.anchorMin = Vector2.zero; slRT.anchorMax = Vector2.one;
         slRT.offsetMin = Vector2.zero; slRT.offsetMax = Vector2.zero;
         var stepLabelTMP = stepLabelTextGO.AddComponent<TextMeshProUGUI>();
-        stepLabelTMP.text      = "Step 1 of 5 — NAME";
+        stepLabelTMP.text      = "";
         stepLabelTMP.fontSize  = 11f;
         stepLabelTMP.color     = UITheme.SystemText;
         stepLabelTMP.alignment = TextAlignmentOptions.Center;
@@ -574,17 +577,17 @@ public static class UISceneBuilder
         contentGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
         contentGO.AddComponent<Image>().color = Color.clear;
 
-        // Helper: make a step panel inside contentGO
-        System.Func<string, GameObject> makeStepPanel = (name) =>
+        // Helper: make a step panel inside contentGO (stretched, invisible bg)
+        System.Func<string, GameObject> makeStepPanel = (pname) =>
         {
-            var go = MakeGO(name, contentGO.transform);
+            var go = MakeGO(pname, contentGO.transform);
             var rt = go.GetComponent<RectTransform>();
             rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
             rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
             go.AddComponent<Image>().color = Color.clear;
             var vlg = go.AddComponent<VerticalLayoutGroup>();
-            vlg.padding = new RectOffset(20, 20, 16, 8);
-            vlg.spacing = 10f;
+            vlg.padding = new RectOffset(24, 24, 20, 12);
+            vlg.spacing = 14f;
             vlg.childForceExpandWidth  = true;
             vlg.childForceExpandHeight = false;
             vlg.childControlWidth  = true;
@@ -593,56 +596,97 @@ public static class UISceneBuilder
         };
 
         // ── Step panels ─────────────────────────────────────────────────
-        var stepPanels = new GameObject[6];
+        // Indices: 0=ModeSelect 1=QuickCreate 2=Name 3=Race 4=Class 5=Appearance 6=Backstory 7=Confirm
+        var stepPanels = new GameObject[8];
 
-        // Panel 0: Name
-        stepPanels[0] = makeStepPanel("NamePanel");
-        AddPromptLabel(stepPanels[0].transform, "What is your hero called?");
-        var nameInput = MakeInputField(stepPanels[0].transform, "Adventurer", false);
+        // ── Panel 0: Mode Select ─────────────────────────────────────────
+        stepPanels[0] = makeStepPanel("ModeSelectPanel");
+        AddPromptLabel(stepPanels[0].transform, "How will you create your hero?");
 
-        // Panel 1: Race
-        stepPanels[1] = makeStepPanel("RacePanel");
-        AddPromptLabel(stepPanels[1].transform, "Choose your race:");
-        var raceGrid = MakeGO("RaceGrid", stepPanels[1].transform);
+        // Two large mode buttons side by side
+        var modeRowGO = MakeGO("ModeRow", stepPanels[0].transform);
+        modeRowGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        modeRowGO.AddComponent<Image>().color = Color.clear;
+        var modeHLG = modeRowGO.AddComponent<HorizontalLayoutGroup>();
+        modeHLG.spacing = 12f;
+        modeHLG.childForceExpandHeight = true;
+        modeHLG.childForceExpandWidth  = true;
+        modeHLG.childControlHeight = true;
+        modeHLG.childControlWidth  = true;
+
+        Button modeQuickBtn = MakeModeButton("QuickCreate", modeRowGO.transform,
+            "QUICK CREATE", "Describe your hero in your own words — AI fills in the details",
+            UITheme.GoldAccent, UITheme.BackgroundDeep);
+
+        Button modeStepBtn = MakeModeButton("StepByStep", modeRowGO.transform,
+            "STEP BY STEP", "Choose your name, race, class, and background one at a time",
+            UITheme.BackgroundMid, UITheme.DmText);
+
+        // ── Panel 1: Quick Create ────────────────────────────────────────
+        stepPanels[1] = makeStepPanel("QuickCreatePanel");
+        AddPromptLabel(stepPanels[1].transform, "Describe your character:");
+        var quickDescInput = MakeInputField(stepPanels[1].transform,
+            "e.g. 'A tall elven wizard named Lyra who grew up in a forest village and specializes in fire magic...'",
+            true);
+        // Status text for "Analyzing..." feedback
+        var quickStatusGO = MakeGO("QuickStatusText", stepPanels[1].transform);
+        var quickStatusLE = quickStatusGO.AddComponent<LayoutElement>();
+        quickStatusLE.preferredHeight = 20f; quickStatusLE.flexibleHeight = 0f;
+        var quickStatusTMP = quickStatusGO.AddComponent<TextMeshProUGUI>();
+        quickStatusTMP.fontSize  = 11f;
+        quickStatusTMP.color     = UITheme.SystemText;
+        quickStatusTMP.alignment = TextAlignmentOptions.Center;
+        quickStatusTMP.text      = "";
+
+        // ── Panel 2: Name ────────────────────────────────────────────────
+        stepPanels[2] = makeStepPanel("NamePanel");
+        AddPromptLabel(stepPanels[2].transform, "What is your hero called?");
+        var nameInput = MakeInputField(stepPanels[2].transform, "Adventurer", false);
+
+        // ── Panel 3: Race ────────────────────────────────────────────────
+        stepPanels[3] = makeStepPanel("RacePanel");
+        AddPromptLabel(stepPanels[3].transform, "Choose your race:");
+        var raceGrid = MakeGO("RaceGrid", stepPanels[3].transform);
         raceGrid.AddComponent<Image>().color = Color.clear;
         raceGrid.AddComponent<LayoutElement>().flexibleHeight = 1f;
         var raceGLG = raceGrid.AddComponent<GridLayoutGroup>();
-        raceGLG.cellSize    = new Vector2(115f, 36f);
-        raceGLG.spacing     = new Vector2(4f, 4f);
+        raceGLG.cellSize    = new Vector2(118f, 38f);
+        raceGLG.spacing     = new Vector2(6f, 6f);
         raceGLG.constraint  = GridLayoutGroup.Constraint.FixedColumnCount;
         raceGLG.constraintCount = 3;
 
-        // Panel 2: Class
-        stepPanels[2] = makeStepPanel("ClassPanel");
-        AddPromptLabel(stepPanels[2].transform, "Choose your class:");
-        var classGrid = MakeGO("ClassGrid", stepPanels[2].transform);
+        // ── Panel 4: Class ───────────────────────────────────────────────
+        stepPanels[4] = makeStepPanel("ClassPanel");
+        AddPromptLabel(stepPanels[4].transform, "Choose your class:");
+        var classGrid = MakeGO("ClassGrid", stepPanels[4].transform);
         classGrid.AddComponent<Image>().color = Color.clear;
         classGrid.AddComponent<LayoutElement>().flexibleHeight = 1f;
         var classGLG = classGrid.AddComponent<GridLayoutGroup>();
-        classGLG.cellSize    = new Vector2(85f, 36f);
-        classGLG.spacing     = new Vector2(4f, 4f);
+        classGLG.cellSize    = new Vector2(88f, 38f);
+        classGLG.spacing     = new Vector2(6f, 6f);
         classGLG.constraint  = GridLayoutGroup.Constraint.FixedColumnCount;
         classGLG.constraintCount = 4;
 
-        // Panel 3: Appearance
-        stepPanels[3] = makeStepPanel("AppearancePanel");
-        AddPromptLabel(stepPanels[3].transform, "Describe your hero's appearance:");
-        var appearanceInput = MakeInputField(stepPanels[3].transform, "Tall, scarred warrior with dark hair...", true);
-        stepPanels[3].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
+        // ── Panel 5: Appearance ──────────────────────────────────────────
+        stepPanels[5] = makeStepPanel("AppearancePanel");
+        AddPromptLabel(stepPanels[5].transform, "Describe your hero's appearance:");
+        var appearanceInput = MakeInputField(stepPanels[5].transform, "Tall, scarred warrior with dark hair...", true);
+        stepPanels[5].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
 
-        // Panel 4: Backstory
-        stepPanels[4] = makeStepPanel("BackstoryPanel");
-        AddPromptLabel(stepPanels[4].transform, "What brought you to this adventure?");
-        var backstoryInput = MakeInputField(stepPanels[4].transform, "My village was destroyed...", true);
-        stepPanels[4].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
+        // ── Panel 6: Backstory ───────────────────────────────────────────
+        stepPanels[6] = makeStepPanel("BackstoryPanel");
+        AddPromptLabel(stepPanels[6].transform, "What brought you to this adventure?");
+        var backstoryInput = MakeInputField(stepPanels[6].transform, "My village was destroyed...", true);
+        stepPanels[6].GetComponent<VerticalLayoutGroup>().childForceExpandHeight = true;
 
-        // Panel 5: Confirm
-        stepPanels[5] = makeStepPanel("ConfirmPanel");
-        var confirmRowGO = MakeGO("PortraitRow", stepPanels[5].transform);
+        // ── Panel 7: Confirm ─────────────────────────────────────────────
+        stepPanels[7] = makeStepPanel("ConfirmPanel");
+        var confirmRowGO = MakeGO("PortraitRow", stepPanels[7].transform);
         confirmRowGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
         confirmRowGO.AddComponent<Image>().color = Color.clear;
         var cHLG = confirmRowGO.AddComponent<HorizontalLayoutGroup>();
-        cHLG.spacing = 12f;
+        cHLG.spacing = 16f;
+        cHLG.padding = new RectOffset(0, 0, 0, 0);
         cHLG.childForceExpandHeight = true;
         cHLG.childForceExpandWidth  = false;
         cHLG.childControlHeight = true;
@@ -650,7 +694,7 @@ public static class UISceneBuilder
 
         // Portrait image — Image (bg) on outer GO, RawImage on child GO
         var portraitGO = MakeGO("PortraitImage", confirmRowGO.transform);
-        portraitGO.AddComponent<LayoutElement>().preferredWidth = 100f;
+        portraitGO.AddComponent<LayoutElement>().preferredWidth = 110f;
         portraitGO.AddComponent<Image>().color = UITheme.BackgroundMid;
         var portraitRawGO = MakeGO("RawImage", portraitGO.transform);
         var portraitRawRT = portraitRawGO.GetComponent<RectTransform>();
@@ -668,8 +712,9 @@ public static class UISceneBuilder
         statsTMP.alignment = TextAlignmentOptions.TopLeft;
 
         // Begin button
-        var beginGO = MakeGO("BeginButton", stepPanels[5].transform);
-        beginGO.AddComponent<LayoutElement>().preferredHeight = 44f;
+        var beginGO = MakeGO("BeginButton", stepPanels[7].transform);
+        var beginLE = beginGO.AddComponent<LayoutElement>();
+        beginLE.minHeight = 44f; beginLE.preferredHeight = 44f; beginLE.flexibleHeight = 0f;
         var beginImg = beginGO.AddComponent<Image>();
         beginImg.color = UITheme.GoldAccent;
         var beginBtn = beginGO.AddComponent<Button>();
@@ -687,12 +732,13 @@ public static class UISceneBuilder
         beginTMP.color     = UITheme.BackgroundDeep;
         beginTMP.alignment = TextAlignmentOptions.Center;
 
-        // ── Nav row ───────────────────────────────────────────────────────
+        // ── Nav row (fixed height, no expansion) ─────────────────────────
         var navRowGO = MakeGO("NavRow", panelGO.transform);
-        navRowGO.AddComponent<LayoutElement>().preferredHeight = 44f;
+        var navRowLE = navRowGO.AddComponent<LayoutElement>();
+        navRowLE.minHeight = 48f; navRowLE.preferredHeight = 48f; navRowLE.flexibleHeight = 0f;
         navRowGO.AddComponent<Image>().color = UITheme.BackgroundMid;
         var navHLG = navRowGO.AddComponent<HorizontalLayoutGroup>();
-        navHLG.padding  = new RectOffset(12, 12, 6, 6);
+        navHLG.padding  = new RectOffset(12, 12, 8, 8);
         navHLG.spacing  = 8f;
         navHLG.childForceExpandHeight = true;
         navHLG.childForceExpandWidth  = false;
@@ -704,23 +750,30 @@ public static class UISceneBuilder
         var navSpacer = MakeGO("Spacer", navRowGO.transform);
         navSpacer.AddComponent<LayoutElement>().flexibleWidth = 1f;
         var nextBtn   = MakeNavButton("NextButton",   "Next >", navRowGO.transform, UITheme.GoldAccent, UITheme.BackgroundDeep, 80f);
+        var nextBtnLabel = nextBtn.GetComponentInChildren<TextMeshProUGUI>();
 
         // ── Wire CharacterCreationPopup fields ───────────────────────────
         var so = new SerializedObject(popup);
         SetArrayProp(so, "stepPanels", stepPanels);
-        SetProp(so, "nameInput", nameInput);
-        SetProp(so, "raceGridContainer", raceGrid.GetComponent<RectTransform>());
-        SetProp(so, "classGridContainer", classGrid.GetComponent<RectTransform>());
-        SetProp(so, "appearanceInput", appearanceInput);
-        SetProp(so, "backstoryInput", backstoryInput);
-        SetProp(so, "portraitImage", portraitRaw);
-        SetProp(so, "statsText", statsTMP);
-        SetProp(so, "beginButton", beginBtn);
-        SetProp(so, "nextButton", nextBtn);
-        SetProp(so, "backButton", backBtn);
-        SetProp(so, "cancelButton", cancelBtn);
-        SetArrayProp(so, "stepBars", stepBars);
-        SetProp(so, "stepLabel", stepLabelTMP);
+        SetProp(so, "modeQuickButton",        modeQuickBtn);
+        SetProp(so, "modeStepButton",         modeStepBtn);
+        SetProp(so, "quickDescriptionInput",  quickDescInput);
+        SetProp(so, "quickStatusText",        quickStatusTMP);
+        SetProp(so, "nameInput",              nameInput);
+        SetProp(so, "raceGridContainer",      raceGrid.GetComponent<RectTransform>());
+        SetProp(so, "classGridContainer",     classGrid.GetComponent<RectTransform>());
+        SetProp(so, "appearanceInput",        appearanceInput);
+        SetProp(so, "backstoryInput",         backstoryInput);
+        SetProp(so, "portraitImage",          portraitRaw);
+        SetProp(so, "statsText",              statsTMP);
+        SetProp(so, "beginButton",            beginBtn);
+        SetProp(so, "nextButton",             nextBtn);
+        SetProp(so, "backButton",             backBtn);
+        SetProp(so, "cancelButton",           cancelBtn);
+        SetProp(so, "nextButtonLabel",        nextBtnLabel);
+        SetProp(so, "stepIndicatorRow",       barRowGO);
+        SetArrayProp(so, "stepBars",          stepBars);
+        SetProp(so, "stepLabel",              stepLabelTMP);
         so.ApplyModifiedProperties();
 
         // Wire to GameManager if present
@@ -874,6 +927,54 @@ public static class UISceneBuilder
         tmp.fontSize  = 13f;
         tmp.color     = textColor;
         tmp.alignment = TextAlignmentOptions.Center;
+        return btn;
+    }
+
+    /// <summary>GameObject overload for stepIndicatorRow wiring.</summary>
+    private static void SetProp(SerializedObject so, string propName, GameObject value)
+    {
+        var prop = so.FindProperty(propName);
+        if (prop == null) { Debug.LogError($"[UISceneBuilder] Property '{propName}' not found on {so.targetObject.GetType().Name}."); return; }
+        prop.objectReferenceValue = value;
+    }
+
+    /// <summary>Large two-part button used in the mode-select panel.</summary>
+    private static Button MakeModeButton(string goName, Transform parent,
+        string title, string subtitle, Color32 bgColor, Color32 textColor)
+    {
+        var go = MakeGO(goName, parent);
+        go.AddComponent<Image>().color = bgColor;
+        var btn = go.AddComponent<Button>();
+        btn.targetGraphic = go.GetComponent<Image>();
+        var colors = btn.colors;
+        colors.highlightedColor = new Color32(
+            (byte)Mathf.Clamp(bgColor.r + 20, 0, 255),
+            (byte)Mathf.Clamp(bgColor.g + 20, 0, 255),
+            (byte)Mathf.Clamp(bgColor.b + 20, 0, 255), 0xFF);
+        btn.colors = colors;
+
+        var vlg = go.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(12, 12, 16, 16);
+        vlg.spacing = 8f;
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childControlWidth  = true;
+        vlg.childControlHeight = true;
+
+        var titleGO = MakeGO("Title", go.transform);
+        titleGO.AddComponent<LayoutElement>().preferredHeight = 22f;
+        var titleTMP = titleGO.AddComponent<TextMeshProUGUI>();
+        titleTMP.text = title; titleTMP.fontSize = 14f; titleTMP.fontStyle = FontStyles.Bold;
+        titleTMP.color = textColor; titleTMP.alignment = TextAlignmentOptions.Center;
+        titleTMP.characterSpacing = 1f;
+
+        var subGO = MakeGO("Subtitle", go.transform);
+        subGO.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        var subTMP = subGO.AddComponent<TextMeshProUGUI>();
+        subTMP.text = subtitle; subTMP.fontSize = 10f;
+        subTMP.color = new Color(textColor.r / 255f, textColor.g / 255f, textColor.b / 255f, 0.75f);
+        subTMP.alignment = TextAlignmentOptions.Center;
+        subTMP.enableWordWrapping = true;
         return btn;
     }
 

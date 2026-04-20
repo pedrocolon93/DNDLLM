@@ -246,7 +246,11 @@ namespace DnD.Managers
 
         private void OnMenuButtonPressed()
         {
-            SaveCurrentSlot();
+            // Only save if we're in an active game — not during menus or character creation
+            if (currentState == GameState.Exploration ||
+                currentState == GameState.Combat      ||
+                currentState == GameState.Dialogue)
+                SaveCurrentSlot();
             ChangeState(GameState.MainMenu);
         }
 
@@ -381,15 +385,8 @@ namespace DnD.Managers
                 ChatUI.Instance.AddSystemMessage("--- Adventure resumed ---");
             }
 
-            GameState targetState = GameState.Exploration;
-            if (System.Enum.TryParse<GameState>(data.gameState, out var savedState))
-            {
-                // Only restore states we can safely resume — combat/inventory cannot be reconstructed
-                targetState = (savedState == GameState.Exploration || savedState == GameState.MainMenu)
-                              ? savedState
-                              : GameState.Exploration;
-            }
-            ChangeState(targetState);
+            // Always go to Exploration on load — MainMenu would just re-show the title screen
+            ChangeState(GameState.Exploration);
         }
 
         private void StartExploration()
