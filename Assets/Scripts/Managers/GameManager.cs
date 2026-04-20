@@ -99,6 +99,17 @@ namespace DnD.Managers
                     inGameMenuPanel.OnSave            = OnSaveFromMenu;
                     inGameMenuPanel.OnLoad            = OnLoadFromMenu;
                     inGameMenuPanel.OnRegenerateTile  = OnRegenerateTileFromMenu;
+                    inGameMenuPanel.OnTTSAutoPlayChanged = v =>
+                    {
+                        if (DNDLLM.Services.TTSService.Instance != null)
+                            DNDLLM.Services.TTSService.Instance.AutoPlay = v;
+                        SaveCurrentSlot();  // persist immediately
+                    };
+                    inGameMenuPanel.OnTTSEnabledChanged = v =>
+                    {
+                        if (DNDLLM.Services.TTSService.Instance != null)
+                            DNDLLM.Services.TTSService.Instance.Enabled = v;
+                    };
                 }
 
                 if (editMapButton != null)
@@ -428,7 +439,9 @@ namespace DnD.Managers
                 gameState             = currentState.ToString(),
                 messages              = ChatUI.Instance != null
                                             ? ChatUI.Instance.GetMessageHistory()
-                                            : new System.Collections.Generic.List<ChatMessageData>()
+                                            : new System.Collections.Generic.List<ChatMessageData>(),
+                audioAutoplay         = DNDLLM.Services.TTSService.Instance != null
+                                            && DNDLLM.Services.TTSService.Instance.AutoPlay,
             };
             saveData.slotLabel  = $"{saveData.characterName} · {saveData.className} · Lv{saveData.level}";
             saveData.backstory  = _backstory;
@@ -481,6 +494,9 @@ namespace DnD.Managers
                 ? data.tileDescriptions : null;
             _pendingTileGrid = (data.tileGrid != null && data.tileGrid.Count > 0)
                 ? data.tileGrid : null;
+
+            if (DNDLLM.Services.TTSService.Instance != null)
+                DNDLLM.Services.TTSService.Instance.AutoPlay = data.audioAutoplay;
 
             if (playerCharacter == null)
             {
