@@ -344,6 +344,15 @@ namespace DnD.Managers
             playerCharacter.abilities = new AbilityScores(
                 data.str, data.dex, data.con, data.intel, data.wis, data.cha);
 
+            if (!string.IsNullOrEmpty(data.className) &&
+                System.Enum.TryParse<CharacterClassName>(data.className, out var parsedClass))
+            {
+                int hitDie = parsedClass == CharacterClassName.Fighter ? 10
+                           : parsedClass == CharacterClassName.Wizard  ?  6
+                           : parsedClass == CharacterClassName.Rogue   ?  8 : 8;
+                playerCharacter.characterClass = CreateBasicClass(parsedClass, hitDie);
+            }
+
             if (System.Enum.TryParse<Race>(data.raceName, out var parsedRace))
                 playerCharacter.race = parsedRace;
 
