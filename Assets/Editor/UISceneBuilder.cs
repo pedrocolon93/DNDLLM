@@ -394,12 +394,16 @@ public static class UISceneBuilder
             rowHLG.childControlHeight = true;
             rowHLG.childControlWidth  = true;
 
-            // Portrait thumbnail
+            // Portrait thumbnail — Image (bg) on outer GO, RawImage on child GO
             var portraitGO = MakeGO("Portrait", rowGO.transform);
             portraitGO.AddComponent<LayoutElement>().preferredWidth = 40f;
             portraitGO.AddComponent<Image>().color = UITheme.BackgroundDeep;
-            var rawImg = portraitGO.AddComponent<RawImage>();
-            rawImg.color = Color.white;
+            var rawImgGO = MakeGO("RawImage", portraitGO.transform);
+            var rawImgRT = rawImgGO.GetComponent<RectTransform>();
+            rawImgRT.anchorMin = Vector2.zero; rawImgRT.anchorMax = Vector2.one;
+            rawImgRT.offsetMin = Vector2.zero; rawImgRT.offsetMax = Vector2.zero;
+            var rawImg = rawImgGO.AddComponent<RawImage>();
+            rawImg.color = Color.clear;
             slotPortraits[i] = rawImg;
 
             // Info column
@@ -540,11 +544,15 @@ public static class UISceneBuilder
             stepBars[i].color = new Color32(0x4A, 0x38, 0x20, 0xFF);
         }
 
-        // Step label
+        // Step label — Image (bg) on outer GO, TextMeshProUGUI on child GO
         var stepLabelGO = MakeGO("StepLabel", panelGO.transform);
         stepLabelGO.AddComponent<LayoutElement>().preferredHeight = 26f;
         stepLabelGO.AddComponent<Image>().color = UITheme.BackgroundMid;
-        var stepLabelTMP = stepLabelGO.AddComponent<TextMeshProUGUI>();
+        var stepLabelTextGO = MakeGO("Text", stepLabelGO.transform);
+        var slRT = stepLabelTextGO.GetComponent<RectTransform>();
+        slRT.anchorMin = Vector2.zero; slRT.anchorMax = Vector2.one;
+        slRT.offsetMin = Vector2.zero; slRT.offsetMax = Vector2.zero;
+        var stepLabelTMP = stepLabelTextGO.AddComponent<TextMeshProUGUI>();
         stepLabelTMP.text      = "Step 1 of 5 — NAME";
         stepLabelTMP.fontSize  = 11f;
         stepLabelTMP.color     = UITheme.SystemText;
@@ -629,12 +637,16 @@ public static class UISceneBuilder
         cHLG.childControlHeight = true;
         cHLG.childControlWidth  = true;
 
-        // Portrait image
+        // Portrait image — Image (bg) on outer GO, RawImage on child GO
         var portraitGO = MakeGO("PortraitImage", confirmRowGO.transform);
         portraitGO.AddComponent<LayoutElement>().preferredWidth = 100f;
         portraitGO.AddComponent<Image>().color = UITheme.BackgroundMid;
-        var portraitRaw = portraitGO.AddComponent<RawImage>();
-        portraitRaw.color = Color.white;
+        var portraitRawGO = MakeGO("RawImage", portraitGO.transform);
+        var portraitRawRT = portraitRawGO.GetComponent<RectTransform>();
+        portraitRawRT.anchorMin = Vector2.zero; portraitRawRT.anchorMax = Vector2.one;
+        portraitRawRT.offsetMin = Vector2.zero; portraitRawRT.offsetMax = Vector2.zero;
+        var portraitRaw = portraitRawGO.AddComponent<RawImage>();
+        portraitRaw.color = Color.clear;
 
         // Stats text
         var statsGO = MakeGO("StatsText", confirmRowGO.transform);
