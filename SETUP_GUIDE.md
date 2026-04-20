@@ -1,356 +1,116 @@
-# Unity Scene Setup Guide
+# Setup Guide
 
-This guide walks you through setting up a complete D&D game scene from scratch.
-
-## Quick Start Scene Setup
-
-### 1. Create Main Scene
-
-1. `File > New Scene > 2D` or use existing scene
-2. Save as `MainGame.unity` in `Assets/Scenes/`
-
-### 2. Create Game Systems GameObject
-
-Create the core game management systems:
-
-```
-Hierarchy:
-└── GameSystems (Empty GameObject)
-    ├── GameManager (Add Component)
-    ├── DungeonMaster (Add Component)
-    ├── CombatManager (Add Component)
-    └── CommandParser (Add Component)
-```
-
-**Steps:**
-1. Right-click Hierarchy > Create Empty
-2. Rename to "GameSystems"
-3. Add Component > Search "GameManager"
-4. Add Component > Search "DungeonMaster"
-5. Add Component > Search "CombatManager"
-6. Add Component > Search "CommandParser"
-
-**GameManager Configuration:**
-- Check "Use Mock LLM" (for testing without API)
-- Leave Player Character empty for now (we'll create it next)
-
-### 3. Create Player Character
-
-Create the player avatar:
-
-```
-Hierarchy:
-└── Player (2D Sprite)
-    ├── CharacterStats (Add Component)
-    └── PlayerController2D (Add Component)
-```
-
-**Steps:**
-1. Right-click Hierarchy > 2D Object > Sprites > Square (temporary sprite)
-2. Rename to "Player"
-3. Set Transform Position to (0, 0, 0)
-4. Change Sprite color to Blue (for visibility)
-5. Add Component > Search "CharacterStats"
-6. Add Component > Search "PlayerController2D"
-
-**CharacterStats Configuration:**
-- Character Name: "Hero"
-- Race: Human
-- Level: 1
-- Leave Character Class empty (will be assigned in-game)
-
-**PlayerController2D Configuration:**
-- Move Speed: 5
-- Use Grid Movement: ✓
-- Grid Size: 1
-
-**Link to GameManager:**
-1. Select GameSystems
-2. Drag Player into "Player Character" field
-
-### 4. Create Chat UI Canvas
-
-Create the chat interface:
-
-```
-Hierarchy:
-└── Canvas
-    ├── ChatPanel (Panel)
-    │   ├── ScrollView
-    │   │   └── Viewport
-    │   │       └── Content (where messages appear)
-    │   ├── InputField (TMP)
-    │   └── SendButton
-    └── ChatUI (Add Component to Canvas)
-```
-
-**Steps:**
-
-1. Right-click Hierarchy > UI > Canvas
-   - Canvas Scaler: Scale With Screen Size
-   - Reference Resolution: 1920x1080
-
-2. Right-click Canvas > UI > Panel
-   - Rename to "ChatPanel"
-   - Anchor: Bottom
-   - Height: 400
-   - Color: Semi-transparent black (A: 200)
-
-3. Right-click ChatPanel > UI > Scroll View
-   - Remove Horizontal Scrollbar
-   - Vertical Scrollbar: Auto-hide
-   - Movement Type: Clamped
-
-4. Select Viewport
-   - Add Component > Rect Mask 2D
-
-5. Select Content
-   - Add Component > Vertical Layout Group
-     - Child Alignment: Lower Left
-     - Child Force Expand: Width only
-     - Spacing: 5
-   - Add Component > Content Size Fitter
-     - Vertical Fit: Preferred Size
-
-6. Right-click ChatPanel > UI > Input Field (TextMeshPro)
-   - Rename to "InputField"
-   - Anchor: Bottom
-   - Position Y: -350
-   - Width: 1600
-   - Height: 40
-   - Placeholder: "Type your action..."
-
-7. Right-click ChatPanel > UI > Button (TextMeshPro)
-   - Rename to "SendButton"
-   - Anchor: Bottom Right
-   - Position: Next to InputField
-   - Width: 100
-   - Text: "Send"
-
-8. Select Canvas
-   - Add Component > ChatUI
-   - Drag references:
-     - Scroll Rect: ScrollView
-     - Content Panel: Content (inside Viewport)
-     - Input Field: InputField
-     - Send Button: SendButton
-
-### 5. Create Message Prefabs
-
-Create prefabs for different message types:
-
-**Player Message Prefab:**
-1. Right-click Content > UI > Panel
-2. Rename to "PlayerMessage"
-3. Add Component > Horizontal Layout Group
-   - Padding: 10
-   - Child Alignment: Middle Right
-4. Add Component > Content Size Fitter
-   - Vertical Fit: Preferred Size
-5. Right-click PlayerMessage > UI > Text (TextMeshPro)
-   - Rename to "MessageText"
-   - Alignment: Right
-   - Color: Light Blue
-   - Font Size: 18
-6. Drag PlayerMessage to Assets/Prefabs/UI/
-7. Delete from Hierarchy
-
-**DM Message Prefab:**
-1. Duplicate PlayerMessage prefab
-2. Rename to "DMMessage"
-3. Edit:
-   - Horizontal Layout: Alignment = Middle Left
-   - Text: Alignment = Left, Color = White
-4. Save
-
-**System Message Prefab:**
-1. Duplicate DMMessage prefab
-2. Rename to "SystemMessage"
-3. Edit:
-   - Text: Alignment = Center, Color = Yellow/Gold
-   - Font Style: Bold
-4. Save
-
-**Link Prefabs to ChatUI:**
-1. Select Canvas
-2. In ChatUI component:
-   - Player Message Prefab: Drag PlayerMessage
-   - DM Message Prefab: Drag DMMessage
-   - System Message Prefab: Drag SystemMessage
-
-### 6. Create Tilemap (Optional)
-
-Add a basic dungeon map:
-
-```
-Hierarchy:
-└── Grid
-    └── Tilemap
-        ├── Tilemap Renderer
-        └── Tilemap Collider 2D
-```
-
-**Steps:**
-1. Right-click Hierarchy > 2D Object > Tilemap > Rectangular
-2. Window > 2D > Tile Palette
-3. Create New Palette: "DungeonTiles"
-4. Import or create tile sprites
-5. Paint your dungeon!
-
-**Camera Setup:**
-1. Select Main Camera
-2. Projection: Orthographic
-3. Size: 5 (adjust to fit your view)
-4. Background: Black
-
-### 7. Final Configuration
-
-**Event System:**
-- Should be auto-created with Canvas
-- If not: Right-click Hierarchy > UI > Event System
-
-**GameSystems Final Check:**
-1. Select GameSystems
-2. Verify all components present:
-   - GameManager ✓
-   - DungeonMaster ✓
-   - CombatManager ✓
-   - CommandParser ✓
-3. GameManager fields:
-   - Player Character: Player ✓
-   - Use Mock LLM: ✓ (for testing)
-
-### 8. Test the Scene
-
-Press Play! You should see:
-- Chat UI at the bottom
-- Welcome message from the system
-- Ability to type and send messages
-- Player character visible in scene
-
-**Test Commands:**
-- Type "start" to begin character creation
-- Type "I want to be a fighter"
-- Type "attack the goblin" (will create test encounter)
-
-## Creating Character Classes
-
-Create ScriptableObject assets for classes:
-
-1. Right-click Assets/ScriptableObjects/Classes
-2. Create > DnD > Character Class
-3. Configure:
-
-**Fighter:**
-- Class Name: Fighter
-- Hit Die Size: 10
-- Primary Ability: Strength
-- Secondary Ability: Constitution
-- Saving Throw Proficiencies: Strength, Constitution
-- Armor Proficiencies: Light, Medium, Heavy, Shield
-- Weapon Proficiencies: Simple, Martial
-- Starting Gold: 150
-
-**Wizard:**
-- Class Name: Wizard
-- Hit Die Size: 6
-- Primary Ability: Intelligence
-- Secondary Ability: Wisdom
-- Saving Throw Proficiencies: Intelligence, Wisdom
-- Is Spellcaster: ✓
-- Spellcasting Ability: Intelligence
-
-**Rogue:**
-- Class Name: Rogue
-- Hit Die Size: 8
-- Primary Ability: Dexterity
-- Secondary Ability: Intelligence
-- Saving Throw Proficiencies: Dexterity, Intelligence
-
-**Cleric:**
-- Class Name: Cleric
-- Hit Die Size: 8
-- Primary Ability: Wisdom
-- Secondary Ability: Constitution
-- Saving Throw Proficiencies: Wisdom, Charisma
-- Is Spellcaster: ✓
-- Spellcasting Ability: Wisdom
-
-## Creating Items
-
-Create weapons, armor, and consumables:
-
-**Longsword:**
-1. Create > DnD > Items > Weapon
-2. Item Name: "Longsword"
-3. Damage Dice Count: 1
-4. Damage Die: 8
-5. Damage Type: Slashing
-6. Weapon Type: Martial
-7. Value: 15
-8. Weight: 3
-
-**Leather Armor:**
-1. Create > DnD > Items > Armor
-2. Item Name: "Leather Armor"
-3. Armor Type: Light
-4. Base AC: 11
-5. Add Dex Modifier: ✓
-6. Value: 10
-7. Weight: 10
-
-**Healing Potion:**
-1. Create > DnD > Items > Consumable
-2. Item Name: "Potion of Healing"
-3. Healing Amount: 10
-4. Is Stackable: ✓
-5. Max Stack Size: 10
-6. Value: 50
-7. Weight: 0.5
-
-## Troubleshooting
-
-### Chat UI not appearing
-- Check Canvas is enabled
-- Verify ChatUI component is attached
-- Check prefab references are assigned
-
-### Messages not sending
-- Verify ChatUI.OnPlayerInput event is subscribed
-- Check GameManager.Start() completed
-- Look for errors in Console
-
-### Player not moving
-- Check PlayerController2D is attached
-- Verify Use Grid Movement setting
-- Check for Rigidbody2D conflicts
-
-### LLM not responding
-- Check "Use Mock LLM" is enabled for testing
-- Verify DungeonMaster initialized (check Console logs)
-- Look for timeout errors
-
-### Combat not starting
-- Verify CombatManager.Instance is not null
-- Check player and enemy CharacterStats are valid
-- Look for combat state logs in Console
-
-## Next Steps
-
-1. **Test the Game**: Play through character creation and combat
-2. **Customize**: Create your own classes, items, and enemies
-3. **Integrate Real LLM**: Follow README for OpenAI/LLMUnity setup
-4. **Build Dungeon**: Create tilemaps and level designs
-5. **Add Features**: Implement spells, quests, NPCs
-
-## Additional Resources
-
-- Unity TextMeshPro: https://docs.unity3d.com/Packages/com.unity.textmeshpro@3.0/
-- Unity Tilemaps: https://docs.unity3d.com/Manual/Tilemap.html
-- Unity UI: https://docs.unity3d.com/Packages/com.unity.ugui@1.0/
+How to get the project running from a fresh clone. The scene is built by an editor script — you do not need to drag components by hand.
 
 ---
 
-**Scene setup complete!** 🎉
+## 1. Requirements
 
-Your D&D game is ready to play. Start by typing in the chat UI and let the AI DM guide your adventure!
+- Unity **2022.3 LTS** or newer (2D template or any template works).
+- An OpenRouter API key (for chat + image generation), **or** a running local Ollama instance for chat-only play. Image generation always requires OpenRouter.
+
+---
+
+## 2. First-time scene setup
+
+1. Open the project in Unity. Open any scene in `Assets/` (e.g. `masterscene.unity`) or create an empty one.
+2. Menu bar → **DnD → Rebuild UI Canvas**.
+
+   This runs `Assets/Editor/UISceneBuilder.cs`, which:
+   - deletes any existing Canvas,
+   - rebuilds the horizontal split (map on the left, chat on the right),
+   - wires up `ChatUI`, `TitleScreen`, `CharacterCreationPopup`, `InGameMenuPanel`, `EditMapPanel`, and `CharacterScreenPanel`,
+   - creates/updates the `GameManager`, `LLMService`, and `MapGenerator` GameObjects and cross-references them.
+
+3. Save the scene.
+
+If you add new UI panels or rewire references, re-run **DnD → Rebuild UI Canvas**; it is idempotent.
+
+---
+
+## 3. Configure the LLM backend
+
+Select the `LLMService` GameObject in the hierarchy. Important inspector fields:
+
+| Field | Meaning | Typical value |
+|------|---------|---------------|
+| `Provider` | `OpenRouter` or `Ollama` (text only) | `OpenRouter` |
+| `Use Mock` | If checked, `SendPrompt` returns `[MOCK] <input>` and `GenerateImage` returns a random-colour square. Good for UI work without API cost. | off |
+| `Api Key` | OpenRouter bearer token (`sk-or-v1-…`) | your key |
+| `Model` | Chat model for OpenRouter | `openai/gpt-4o-mini` |
+| `Image Model` | Used by `GenerateImage` / `GenerateStyledTile`. Gemini models enable the multimodal style-anchor path. | `google/gemini-2.5-flash-image-preview` |
+| `Ollama Base Url` | Only used when `Provider = Ollama` | `http://localhost:11434` |
+| `Ollama Model` | Local model tag | `llama3.2` |
+| `Use Cache` | Persist generated images under `Application.persistentDataPath/ImageCache/` keyed by prompt | on |
+
+See [`LLM_INTEGRATION_GUIDE.md`](LLM_INTEGRATION_GUIDE.md) for provider trade-offs and the reasoning behind the Gemini-specific path.
+
+---
+
+## 4. (Optional) Configure TTS
+
+Select the `GameSystem` GameObject and find `TTSService`:
+
+| Field | Meaning |
+|------|---------|
+| `Enabled` | Master off switch. Play buttons disappear from DM bubbles when off. |
+| `Model` | OpenRouter slug. Default `openai/gpt-audio`. |
+| `Voice` | One of `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`. |
+| `Format` | `wav` (only supported format today). |
+| `Auto Play` | If on, every new DM message auto-speaks. Mirrored to the in-game menu and persisted per slot. |
+| `Volume` | `AudioSource.volume` applied to playback. |
+| `Use Cache` | Persist generated WAVs under `Application.persistentDataPath/AudioCache/` keyed by SHA256 of text. |
+
+TTS reuses `LLMService.ApiKey` — no second token required.
+
+---
+
+## 5. Configure the GameManager (optional)
+
+Select the `GameManager` GameObject. The `Use Mock LLM` toggle controls which `ILLMProvider` implementation is handed to `DungeonMaster` / `CommandParser` for campaign-timeline and command-parsing calls. Today only `MockLLMProvider` is wired in — the live path goes through `LLMService` regardless — so leave this checked.
+
+UI references (`TitleScreen`, `CharacterCreationPopup`, `InGameMenuPanel`, `EditMapPanel`, `CharacterScreenPanel`, buttons) are populated automatically by **DnD → Rebuild UI Canvas**.
+
+---
+
+## 6. Play loop
+
+1. Press **Play**. The title screen shows three slots. Empty slots show **+ New**; full slots show the character label and portrait.
+2. **New Game** → type a campaign prompt in the chat box (e.g. *"a haunted lighthouse on a storm-wracked cliff"*). `GameManager.StartCampaignAsync` asks `DungeonMaster` for a timeline, then opens `CharacterCreationPopup`.
+3. Fill in the popup (name, race, class, ability scores, appearance, backstory). A portrait is generated in the background via `LLMService.GenerateImage`.
+4. On completion the game transitions to `Exploration`:
+   - `MapGenerator` draws a 7×7 grid and generates tile art in style.
+   - The DM narrates the opening scene, including a `[GM_ACTIONS]` block if needed (see LLM guide).
+   - NPC / enemy tokens are spawned in parallel via `GameManager.SpawnMapEntitiesAsync`.
+   - An autosave fires.
+5. Type natural-language actions. Direction words (`north`, `go west`, `ne`) also move the character token before the DM call runs. Stepping onto a `Door` or `Exit` tile short-circuits straight into sub-map traversal; every other input also triggers DM narration via `LLMService.SendPrompt`.
+6. Stepping onto a `Door` tile, or a DM `ENTER_SUBREGION` command, pushes a new map onto `MapGraph`. Stepping onto an `Exit` tile pops back to the parent map at the position you left.
+7. **Menu** button (top-right) opens `InGameMenuPanel` with **Save**, **Load**, **Regenerate Tile** at the current position. **Character** button opens the character sheet. **Edit Map** button opens the tile painter.
+
+---
+
+## 7. Where things live
+
+| Path | What's in it |
+|------|--------------|
+| `Application.persistentDataPath/Saves/slot_{0,1,2}.json` | Character sheet, campaign seed, DM timeline text, chat history, per-tile type + description overrides |
+| `Application.persistentDataPath/Saves/slot_{0,1,2}_portrait.png` | Character portrait or generated map token |
+| `Application.persistentDataPath/ImageCache/` | Prompt-keyed PNG cache of generated images |
+
+macOS path: `~/Library/Application Support/<company>/<product>/`.
+
+---
+
+## 8. Troubleshooting
+
+- **Title screen and slots not appearing.** Re-run **DnD → Rebuild UI Canvas** and save the scene. Check the top-left debug label — if it says `ChatUI MISSING`, the canvas build failed.
+- **Tile generation looks generic / breaks style.** The style anchor is the first Floor tile. If `Image Model` does not start with `google/`, `GenerateStyledTile` falls back to `GenerateImage` (prompt-only, no image reference) and the art style drifts. Use a Gemini image model.
+- **Blank / error responses during exploration.** Check the Unity console for `[LLMService] Chat error` — the error body is logged verbatim. Usually the API key, model slug, or rate limit.
+- **Ollama returns errors.** Ollama's OpenAI-compatible endpoint requires `/v1/chat/completions`. `LLMService` builds that URL automatically from `Ollama Base Url`; confirm your model is pulled (`ollama pull llama3.2`).
+- **Stale layout after editing UI scripts.** Always re-run **DnD → Rebuild UI Canvas** after changing `UISceneBuilder.cs` — the scene captures the built output, not the script.
+
+---
+
+## 9. Rebuilding or wiping saves
+
+Delete individual slots from the title screen (each slot row has a delete button). To wipe everything, remove the `Saves/` folder at `Application.persistentDataPath`.
