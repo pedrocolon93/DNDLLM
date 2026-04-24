@@ -18,7 +18,7 @@ namespace DNDLLM.Services
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
         public string ApiKey => apiKey;
         [SerializeField] private string model = "openai/gpt-4o-mini";
-        [SerializeField] private string imageModel = "openai/dall-e-3";
+        [SerializeField] private string imageModel = "google/gemini-2.5-flash-image";
 
         [Header("Ollama  (text only — images still use OpenRouter)")]
         [SerializeField] private string ollamaBaseUrl = "http://localhost:11434";
@@ -303,10 +303,20 @@ namespace DNDLLM.Services
         }
 
         /// <summary>
-        /// Generates a tile image using Gemini multimodal: sends the style anchor image as a
-        /// reference so all tiles share the same art style. No disk caching — every tile is unique.
+        /// Generates a tile image using Gemini multimodal with a single reference image.
+        /// Convenience wrapper over the multi-reference overload.
         /// </summary>
-        public async Task<Texture2D> GenerateStyledTile(string tilePrompt, Texture2D styleAnchor)
+        public Task<Texture2D> GenerateStyledTile(string tilePrompt, Texture2D styleAnchor)
+            => GenerateStyledTile(tilePrompt, styleAnchor != null ? new[] { styleAnchor } : null);
+
+        /// <summary>
+        /// Generates a tile image using Gemini multimodal: sends up to 4 reference images
+        /// (style anchors + actual neighbor textures) so the new tile matches both the
+        /// overall art style and its neighbors' edge features.
+        /// References are sent in-order; clamped to 4 to stay within token budget.
+        /// DALL-E path ignores references (prompt-only fallback).
+        /// </summary>
+        public async Task<Texture2D> GenerateStyledTile(string tilePrompt, Texture2D[] references)
         {
             if (useCache)
             {
@@ -338,24 +348,28 @@ namespace DNDLLM.Services
             if (!this.imageModel.ToLower().StartsWith("google/"))
                 return await GenerateImage(tilePrompt);
 
-            // Build multimodal content array: [image_url part, text part]
+            // Build multimodal content array: [image_url parts (clamped to 4), text part]
             string escapedPrompt = EscapeJson(tilePrompt);
-            string contentArray;
+            var sb = new System.Text.StringBuilder("[");
 
-            if (styleAnchor != null)
+            int refCount = 0;
+            if (references != null)
             {
-                byte[] pngBytes = styleAnchor.EncodeToPNG();
-                string base64 = System.Convert.ToBase64String(pngBytes);
-                // base64 alphabet is URL-safe; no JSON escaping needed for the data
-                contentArray = "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,"
-                             + base64
-                             + "\"}},{\"type\":\"text\",\"text\":\""
-                             + escapedPrompt + "\"}]";
+                foreach (var r in references)
+                {
+                    if (r == null) continue;
+                    if (refCount >= 4) break; // token-budget guard
+                    byte[] pngBytes = r.EncodeToPNG();
+                    if (pngBytes == null) continue;
+                    string base64 = System.Convert.ToBase64String(pngBytes);
+                    sb.Append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,")
+                      .Append(base64)
+                      .Append("\"}},");
+                    refCount++;
+                }
             }
-            else
-            {
-                contentArray = "[{\"type\":\"text\",\"text\":\"" + escapedPrompt + "\"}]";
-            }
+            sb.Append("{\"type\":\"text\",\"text\":\"").Append(escapedPrompt).Append("\"}]");
+            string contentArray = sb.ToString();
 
             string requestJson = "{\"model\":\"" + EscapeJson(this.imageModel)
                                + "\",\"messages\":[{\"role\":\"user\",\"content\":"
