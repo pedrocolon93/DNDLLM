@@ -97,6 +97,12 @@ namespace DNDLLM.Map
             public bool walkable;
             /// <summary>Edge feature descriptions indexed [N, E, S, W]. Populated by the spatial-plan LLM pass.</summary>
             public string[] edgeSignatures = new string[4];
+            /// <summary>For building/door tiles: the pre-planned theme for the interior the player
+            /// enters through this tile. Populated by the spatial-plan LLM pass. Empty when absent.</summary>
+            public string interiorTheme = "";
+            /// <summary>Optional short blueprint/sub-description of what that interior contains
+            /// (bar, hearth, bedroom upstairs, etc.), fed into the child map's spatial-plan.</summary>
+            public string interiorBlueprint = "";
         }
 
         /// <summary>Index constants for MapTile.edgeSignatures.</summary>
@@ -1098,8 +1104,12 @@ namespace DNDLLM.Map
               + "(e.g. \"continuous 2-stone-wide cobblestone path\", \"solid cut-stone wall, no opening\", \"mossy crack from center to right\").\n"
               + "HARD CONSTRAINT: tile (x,y).E must equal tile (x+1,y).W, and tile (x,y).N must equal tile (x,y+1).S. "
               + "Boundary edges with no neighbor may be \"map edge\".\n"
+              + "For any tile whose type is House, Inn, Market, or Door (an entry point to an interior), "
+              + "also append |INTERIOR=<theme>; <blueprint> where <theme> is a short interior description "
+              + "(e.g. \"cozy oak-beamed inn common room\") and <blueprint> is 1 sentence about what's inside "
+              + "(e.g. \"hearth, long bar, staircase up, mismatched tables\"). Other tile types MUST OMIT the INTERIOR field.\n"
               + "Use exactly this format, one line per tile, no blank lines:\n"
-              + "TILE x,y: DESC=<sentence> | N=<phrase> | E=<phrase> | S=<phrase> | W=<phrase>";
+              + "TILE x,y: DESC=<sentence> | N=<phrase> | E=<phrase> | S=<phrase> | W=<phrase> [| INTERIOR=<theme>; <blueprint>]";
 
             string raw = await LLMService.Instance.SendPrompt(sys, usr);
             if (string.IsNullOrEmpty(raw))
@@ -1126,7 +1136,7 @@ namespace DNDLLM.Map
                 if (tx < 0 || tx >= width || ty < 0 || ty >= height) continue;
 
                 string body = line.Substring(colon + 1);
-                string desc = "", n = "", e = "", s = "", w = "";
+                string desc = "", n = "", e = "", s = "", w = "", interior = "";
                 foreach (string part in body.Split('|'))
                 {
                     string p = part.Trim();
@@ -1136,11 +1146,12 @@ namespace DNDLLM.Map
                     string val = p.Substring(eq + 1).Trim();
                     switch (key)
                     {
-                        case "DESC": desc = val; break;
-                        case "N":    n    = val; break;
-                        case "E":    e    = val; break;
-                        case "S":    s    = val; break;
-                        case "W":    w    = val; break;
+                        case "DESC":     desc     = val; break;
+                        case "N":        n        = val; break;
+                        case "E":        e        = val; break;
+                        case "S":        s        = val; break;
+                        case "W":        w        = val; break;
+                        case "INTERIOR": interior = val; break;
                     }
                 }
 
@@ -1150,6 +1161,21 @@ namespace DNDLLM.Map
                 if (!string.IsNullOrEmpty(e)) edges[EdgeE] = e;
                 if (!string.IsNullOrEmpty(s)) edges[EdgeS] = s;
                 if (!string.IsNullOrEmpty(w)) edges[EdgeW] = w;
+
+                // INTERIOR is "<theme>; <blueprint>" — split on the first ';' so both halves reach the child map.
+                if (!string.IsNullOrEmpty(interior))
+                {
+                    int semi = interior.IndexOf(';');
+                    if (semi > 0)
+                    {
+                        grid[tx, ty].interiorTheme     = interior.Substring(0, semi).Trim();
+                        grid[tx, ty].interiorBlueprint = interior.Substring(semi + 1).Trim();
+                    }
+                    else
+                    {
+                        grid[tx, ty].interiorTheme = interior;
+                    }
+                }
                 parsed++;
             }
 

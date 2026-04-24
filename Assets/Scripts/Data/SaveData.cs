@@ -43,6 +43,18 @@ namespace DnD.Data
         // Full per-tile grid state (captures EditMapPanel changes and map graph edits)
         public List<TileGridEntry> tileGrid = new List<TileGridEntry>();
 
+        // Active map dimensions (0 = unknown / not yet generated)
+        public int mapWidth;
+        public int mapHeight;
+
+        // LLM-authored style bible for the active map (palette, materials, lighting, motifs).
+        // Prepended to every tile prompt so regeneration stays on-style after reload.
+        public string styleBible;
+
+        // Player's grid coordinates on the active map (-1 = unplaced)
+        public int playerX = -1;
+        public int playerY = -1;
+
         // TTS preference (per-slot)
         public bool audioAutoplay = false;
     }
@@ -68,6 +80,13 @@ namespace DnD.Data
         public int    x, y;
         public string tileType;    // TileType.ToString()
         public string description;
+        // Edge signatures indexed [N, E, S, W] — what visual feature crosses each edge.
+        // Used by coherent-tile regeneration so neighbors keep continuity after reload.
+        public string edgeN, edgeE, edgeS, edgeW;
+        // Pre-planned interior blueprint for Building/Door tiles: feeds the child map's
+        // theme when the player enters, so interiors stay coherent with the exterior.
+        public string interiorTheme;
+        public string interiorBlueprint;
     }
 
     // Passed from CharacterCreationPopup to GameManager on completion
