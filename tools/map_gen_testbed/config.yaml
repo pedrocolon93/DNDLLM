@@ -2,7 +2,8 @@ theme: sunlit seaside village
 size: 5
 tile_px: 512
 text_model: google/gemini-2.5-flash
-image_model: google/gemini-2.5-flash-image
+image_model: black-forest-labs/flux.2-pro
 max_correction_tiles: 3
+refine_with_neighbors: true   # big-slice-refined: attach N/E/S/W coarse slices as extra refs
 env_file: /Users/pedro/PycharmProjects/fintech2/.env
 output_dir: out

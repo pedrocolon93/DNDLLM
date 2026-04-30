@@ -82,10 +82,14 @@ class Client:
             )
         content.append({"type": "text", "text": prompt})
 
+        chosen_model = model or self.image_model
+        # FLUX (and other image-only output models) reject ["image","text"];
+        # Gemini's image-gen model accepts either. Default to image-only output.
+        modalities = ["image"] if chosen_model.startswith("black-forest-labs/") else ["image", "text"]
         body = {
-            "model": model or self.image_model,
+            "model": chosen_model,
             "messages": [{"role": "user", "content": content}],
-            "modalities": ["image", "text"],
+            "modalities": modalities,
         }
         t0 = time.time()
         resp = requests.post(ENDPOINT, json=body, headers=self._headers(), timeout=self.timeout)

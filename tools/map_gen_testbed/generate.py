@@ -114,6 +114,44 @@ RULES:
 Output ONLY the TILE lines, one per tile, separated by newlines. No JSON, no markdown, no preamble."""
 
 
+def tile_refinement_prompt(
+    bible: str,
+    tile: dict,
+    x: int,
+    y: int,
+    has_neighbor_refs: bool,
+) -> str:
+    edges = tile.get("edges", {})
+    objects = tile.get("objects") or "none"
+    composition = "" if objects.lower() == "none" else f"OBJECTS: {objects}\n"
+    ref_note = (
+        "The FIRST attached image is the existing rough version of THIS tile. "
+        "The remaining attached images are the neighbor tiles already rendered."
+        if has_neighbor_refs else
+        "The attached image is the existing rough version of THIS tile."
+    )
+    return f"""{bible}
+
+You are REFINING one tile of an already-rendered overhead pixel-art map.
+
+{ref_note}
+
+Your job: re-draw THIS tile at high detail while:
+  1. Keeping the SAME composition, palette, lighting, and material distribution as the first reference.
+  2. Adding the specific features described below.
+  3. Keeping every edge MATCHING the existing rough version pixel-by-pixel — the seam to each neighbor must remain continuous.
+  4. NO frame, NO border, NO caption, NO vignette. Orthographic top-down. Content runs to all four canvas edges.
+
+TILE ({x},{y}) DESCRIPTION: {tile['description']}
+{composition}EDGES (do not contradict; these MUST visually continue from the rough version):
+  N={edges.get('N','')}
+  E={edges.get('E','')}
+  S={edges.get('S','')}
+  W={edges.get('W','')}
+
+Output ONE square image only — the refined version of this tile."""
+
+
 def tile_image_prompt(
     bible: str,
     tile: dict,
@@ -421,6 +459,112 @@ def run_big_slice(cfg: dict, out_dir: Path):
     log.close()
 
 
+def run_big_slice_refined(cfg: dict, out_dir: Path):
+    load_dotenv(cfg.get("env_file"))
+    client = Client.from_env(
+        text_model=cfg.get("text_model", "google/gemini-2.5-flash"),
+        image_model=cfg.get("image_model", "google/gemini-2.5-flash-image"),
+    )
+    theme = cfg["theme"]
+    size = cfg["size"]
+    tile_px = cfg.get("tile_px", 512)
+    use_neighbors = bool(cfg.get("refine_with_neighbors", True))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log = (out_dir / "run_log.txt").open("w")
+
+    def say(msg):
+        print(msg)
+        log.write(msg + "\n")
+        log.flush()
+
+    say(f"== BIG-SLICE-REFINED STRATEGY ==  theme={theme!r}  size={size}x{size}")
+    say(f"text_model={client.text_model}  image_model={client.image_model}")
+    say(f"refine_with_neighbors={use_neighbors}")
+
+    grid = build_layout(size)
+    ascii_grid = layout_to_ascii(grid)
+    say("Layout:\n" + ascii_grid)
+
+    # Phase 1 — style bible
+    say("\n[Phase 1] Style bible...")
+    bible = client.chat(style_bible_prompt(theme))
+    (out_dir / "style_bible.txt").write_text(bible)
+    say(bible)
+
+    # Phase 2 — spatial plan + reconcile
+    say("\n[Phase 2] Planning tile contents and edges...")
+    plan_text = client.chat(spatial_plan_prompt(theme, size, grid, bible))
+    (out_dir / "spatial_plan_raw.txt").write_text(plan_text)
+    plan = parse_spatial_plan(plan_text, size)
+    for y in range(size):
+        for x in range(size):
+            if (x, y) not in plan:
+                plan[(x, y)] = {
+                    "description": f"{grid[y][x]} tile at ({x},{y})",
+                    "objects": "none",
+                    "edges": {"N": "", "E": "", "S": "", "W": ""},
+                    "interior": "",
+                }
+    missing = [(x, y) for y in range(size) for x in range(size) if not plan[(x, y)]["description"]]
+    say(f"Parsed tiles: {len(plan)}  missing-desc stubs: {len(missing)}")
+    reconcile_edges(plan, size)
+    with (out_dir / "spatial_plan.json").open("w") as f:
+        json.dump({f"{x},{y}": t for (x, y), t in plan.items()}, f, indent=2)
+
+    # Phase 3 — big-slice render
+    say("\n[Phase 3] Rendering whole map as one image...")
+    big = client.image(big_slice_prompt(theme, size, bible, ascii_grid))
+    if big is None:
+        say("[ERROR] Big image generation failed. Aborting.")
+        log.close()
+        return
+    (out_dir / "mosaic_raw.png").write_bytes(_png_bytes(big))
+    say(f"  big image size = {big.size}")
+
+    # Phase 4 — slice + save coarse + stitch pre-refinement mosaic
+    say("\n[Phase 4] Slicing into coarse tiles...")
+    coarse = slice_big_image(big, size, tile_px)
+    for (x, y), t in coarse.items():
+        t.save(out_dir / f"tile_{x}_{y}_coarse.png")
+    pre_rows = [[coarse.get((x, y)) for x in range(size)] for y in range(size)]
+    pre_mosaic = stitch(pre_rows, tile_px=tile_px)
+    pre_mosaic.save(out_dir / "mosaic_pre_refinement.png")
+
+    # Phase 5 — per-tile refinement
+    say("\n[Phase 5] Per-tile refinement...")
+    refined: dict[tuple[int, int], Image.Image] = {}
+    total = size * size
+    done = 0
+    for y in range(size):
+        for x in range(size):
+            done += 1
+            refs = [coarse[(x, y)]]  # own slice always slot 0
+            if use_neighbors:
+                for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0)]:  # N, E, S, W
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < size and 0 <= ny < size and len(refs) < 4:
+                        refs.append(coarse[(nx, ny)])
+            say(f"  [{done}/{total}] refine ({x},{y}) type={grid[y][x]} refs={len(refs)}")
+            prompt = tile_refinement_prompt(
+                bible, plan[(x, y)], x, y,
+                has_neighbor_refs=len(refs) > 1,
+            )
+            img = client.image(prompt, references=refs)
+            if img is None:
+                say(f"  [WARN] refine ({x},{y}) failed — using coarse slice")
+                img = coarse[(x, y)]
+            refined[(x, y)] = img
+            img.save(out_dir / f"tile_{x}_{y}.png")
+
+    # Phase 6 — stitch refined
+    say("\n[Phase 6] Stitching refined mosaic...")
+    rows = [[refined.get((x, y)) for x in range(size)] for y in range(size)]
+    mosaic = stitch(rows, tile_px=tile_px)
+    mosaic.save(out_dir / "mosaic.png")
+    say(f"\nDone. Output: {out_dir}")
+    log.close()
+
+
 def _png_bytes(img: Image.Image) -> bytes:
     import io
     buf = io.BytesIO()
@@ -605,8 +749,12 @@ def main():
     p.add_argument("--model", default=None, help="image model override")
     p.add_argument("--text-model", default=None)
     p.add_argument("--out", default=None)
-    p.add_argument("--strategy", choices=["tile-bfs", "big-slice"], default="tile-bfs",
-                   help="tile-bfs: one image call per tile (~30 calls). big-slice: one image call total, sliced into tiles.")
+    p.add_argument("--strategy",
+                   choices=["tile-bfs", "big-slice", "big-slice-refined"],
+                   default="tile-bfs",
+                   help="tile-bfs: one image call per tile (~30 calls). "
+                        "big-slice: one image call total, sliced into tiles. "
+                        "big-slice-refined: big-slice as a coarse base, then per-tile refinement (1+N*N image calls).")
     args = p.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -620,7 +768,11 @@ def main():
         cfg["text_model"] = args.text_model
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    tag = "bigslice" if args.strategy == "big-slice" else "tilebfs"
+    tag = {
+        "tile-bfs": "tilebfs",
+        "big-slice": "bigslice",
+        "big-slice-refined": "bigslicerefined",
+    }[args.strategy]
     base_out = Path(args.out or cfg.get("output_dir", "out"))
     if not base_out.is_absolute():
         base_out = Path(__file__).parent / base_out
@@ -628,6 +780,8 @@ def main():
 
     if args.strategy == "big-slice":
         run_big_slice(cfg, run_dir)
+    elif args.strategy == "big-slice-refined":
+        run_big_slice_refined(cfg, run_dir)
     else:
         run(cfg, run_dir)
 
