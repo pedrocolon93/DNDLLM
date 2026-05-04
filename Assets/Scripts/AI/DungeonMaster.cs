@@ -402,17 +402,28 @@ DESC: [description]";
             return finalNarration;
         }
 
+        // Cached PNG-base64 encoding of the battlemap. Keyed by texture reference so that a
+        // new map (different StyleAnchor instance) automatically invalidates the cache, and
+        // so repeated player turns on the same map skip ~100–300 ms of PNG+base64 work.
+        private static Texture2D _cachedMapTex;
+        private static string    _cachedMapDataUrl;
+
         /// <summary>Returns a data:image/png;base64,... URL for the current battlemap, or "" if none/unreadable.</summary>
         private static string TryEncodeMapDataUrl()
         {
             var gen = DNDLLM.Map.MapGenerator.Instance;
             var tex = gen != null ? gen.StyleAnchor : null;
             if (tex == null) return "";
+            if (ReferenceEquals(tex, _cachedMapTex)) return _cachedMapDataUrl ?? "";
+
             try
             {
                 byte[] png = tex.EncodeToPNG();
                 if (png == null || png.Length == 0) return "";
-                return "data:image/png;base64," + System.Convert.ToBase64String(png);
+                string url = "data:image/png;base64," + System.Convert.ToBase64String(png);
+                _cachedMapTex     = tex;
+                _cachedMapDataUrl = url;
+                return url;
             }
             catch (Exception e)
             {
