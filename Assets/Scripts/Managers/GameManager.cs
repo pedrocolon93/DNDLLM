@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using DnD.Core;
 using DnD.Character;
 using DnD.AI;
@@ -154,6 +156,15 @@ namespace DnD.Managers
         {
             if (!Input.GetKeyDown(KeyCode.Escape)) return;
 
+            // First Escape while an input field has focus = blur the field. Unity/TMP handle
+            // the deactivation themselves; we just bail out so the same press doesn't ALSO
+            // open the menu or close a panel. The next Escape (no field focused) goes through.
+            if (EventSystem.current != null)
+            {
+                var sel = EventSystem.current.currentSelectedGameObject;
+                if (sel != null && sel.GetComponent<TMP_InputField>() != null) return;
+            }
+
             // Close the topmost open panel/popup. If nothing is open, the in-game menu
             // acts as a pause toggle — same affordance as the MENU button.
             if (TryClose(adventurePromptPopup)  ) return;
@@ -180,7 +191,14 @@ namespace DnD.Managers
                 case DnD.UI.InGameMenuPanel m:        m.Close(); return true;
                 case DnD.UI.EditMapPanel e:           e.Close(); return true;
                 case DnD.UI.CharacterScreenPanel c:   c.Close(); return true;
-                case DnD.UI.AdventurePromptPopup a:   a.Close(); return true;
+                // Adventure prompt's OnCancel handler in GameManager closes the popup AND
+                // calls ChangeState(MainMenu) (which re-shows the title screen). Skipping
+                // OnCancel — as a plain Close() would — leaves the user with a black screen
+                // because the title was already hidden when the popup opened.
+                case DnD.UI.AdventurePromptPopup a:
+                    if (a.OnCancel != null) a.OnCancel.Invoke();
+                    else                    a.Close();
+                    return true;
                 default:                              panel.gameObject.SetActive(false); return true;
             }
         }
