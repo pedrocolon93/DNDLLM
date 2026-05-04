@@ -37,6 +37,13 @@ Your role:
 - Generate appropriate challenges based on party level
 - Keep responses concise but descriptive (2-4 sentences)
 
+MAP VISION:
+- When a battlemap image is attached to the user message, treat it as your view of the scene.
+  The image is the painted overhead map for the player's current area, with the same grid
+  coordinates the textual ""Environment"" block describes. Use it to ground your narration
+  in what is actually depicted (terrain, structures, features, sightlines, distances).
+- Never claim something appears on the map that isn't visible in the image.
+
 TOOL USE — IMPORTANT:
 - When the player's action requires a change to game state (movement, damage, healing, conditions,
   spawning enemies, awarding XP, etc.), call the appropriate tool.
@@ -45,6 +52,17 @@ TOOL USE — IMPORTANT:
   the in-character narration of what happened — and NO tool call.
 - If the player's input is purely descriptive or conversational and changes nothing, skip tool
   calls entirely and respond with narration directly.
+
+INTERACTIVE OPTIONS — IMPORTANT:
+- Whenever the moment naturally invites a choice (exploration crossroads, NPC interaction,
+  reactions to a threat), end your final narration with 2-4 suggested actions.
+- Format each option on its own line, prefixed with ""> "" (greater-than + space). Example:
+    > Investigate the ruins
+    > Talk to the hooded stranger
+    > Climb the ridge for a better view
+- Each option must be a short imperative phrase (2-8 words), written as if the player were
+  typing it. Do not number them. Do not put narration text after the option block.
+- Skip the option block during fast-moving combat exchanges or when the next action is obvious.
 
 When describing combat outcomes, reference dice rolls and mechanics.
 When players explore, describe what they see, hear, and sense.
@@ -333,7 +351,14 @@ DESC: [description]";
             string userBlock = string.IsNullOrEmpty(envContext)
                 ? $"Player: {playerInput}"
                 : $"Context: {envContext}\n\nPlayer: {playerInput}";
-            msgs.Add(LLMChatMessage.User(userBlock));
+
+            // Attach the painted battlemap to the player turn so multimodal models (Qwen, Gemini,
+            // GPT-4o, …) can see what the player is looking at. StyleAnchor holds the final
+            // grid-overlaid map texture; on text-only models the image is ignored harmlessly.
+            string mapDataUrl = TryEncodeMapDataUrl();
+            msgs.Add(string.IsNullOrEmpty(mapDataUrl)
+                ? LLMChatMessage.User(userBlock)
+                : LLMChatMessage.UserWithImage(userBlock, mapDataUrl));
 
             string finalNarration = "";
             int steps = 0;
@@ -375,6 +400,25 @@ DESC: [description]";
             if (!string.IsNullOrEmpty(finalNarration)) AddToHistory($"DM: {finalNarration}");
             OnDMResponse?.Invoke(finalNarration);
             return finalNarration;
+        }
+
+        /// <summary>Returns a data:image/png;base64,... URL for the current battlemap, or "" if none/unreadable.</summary>
+        private static string TryEncodeMapDataUrl()
+        {
+            var gen = DNDLLM.Map.MapGenerator.Instance;
+            var tex = gen != null ? gen.StyleAnchor : null;
+            if (tex == null) return "";
+            try
+            {
+                byte[] png = tex.EncodeToPNG();
+                if (png == null || png.Length == 0) return "";
+                return "data:image/png;base64," + System.Convert.ToBase64String(png);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[DungeonMaster] Map encode failed: {e.Message}");
+                return "";
+            }
         }
     }
 

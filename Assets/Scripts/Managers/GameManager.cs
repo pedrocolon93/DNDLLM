@@ -150,6 +150,41 @@ namespace DnD.Managers
             GUI.color = Color.white;
         }
 
+        private void Update()
+        {
+            if (!Input.GetKeyDown(KeyCode.Escape)) return;
+
+            // Close the topmost open panel/popup. If nothing is open, the in-game menu
+            // acts as a pause toggle — same affordance as the MENU button.
+            if (TryClose(adventurePromptPopup)  ) return;
+            if (TryClose(characterScreenPanel)  ) return;
+            if (TryClose(editMapPanel)          ) return;
+            if (TryClose(inGameMenuPanel)       ) return;
+            if (characterPopup != null && characterPopup.gameObject.activeSelf)
+            {
+                // Mirror the popup's own Cancel button so the GameManager state machine
+                // gets the OnCancelled callback (returns to MainMenu).
+                characterPopup.gameObject.SetActive(false);
+                characterPopup.OnCancelled?.Invoke();
+                return;
+            }
+
+            OnMenuButtonPressed();
+        }
+
+        private static bool TryClose(MonoBehaviour panel)
+        {
+            if (panel == null || !panel.gameObject.activeSelf) return false;
+            switch (panel)
+            {
+                case DnD.UI.InGameMenuPanel m:        m.Close(); return true;
+                case DnD.UI.EditMapPanel e:           e.Close(); return true;
+                case DnD.UI.CharacterScreenPanel c:   c.Close(); return true;
+                case DnD.UI.AdventurePromptPopup a:   a.Close(); return true;
+                default:                              panel.gameObject.SetActive(false); return true;
+            }
+        }
+
         private async Task InitializeSystemsAsync()
         {
             Debug.Log("[GameManager] Initializing systems...");

@@ -1898,16 +1898,16 @@ public static class UISceneBuilder
         MenuMakeLabel(panelGO.transform, "REGENERATE TILE", 11f, UITheme.SystemText,
             TextAlignmentOptions.Center, 20);
 
-        // Tile list container
+        // Tile list container — let the parent VLG own sizing (flexibleHeight = 1) and have
+        // this VLG honor each row's LayoutElement.preferredHeight. ContentSizeFitter conflicts
+        // with flexibleHeight, so we don't use one here.
         var listGO = MakeGO("TileListContainer", panelGO.transform);
         var listVLG = listGO.AddComponent<VerticalLayoutGroup>();
         listVLG.spacing                = 2;
         listVLG.childForceExpandWidth  = true;
         listVLG.childForceExpandHeight = false;
         listVLG.childControlWidth      = true;
-        listVLG.childControlHeight     = false;
-        var listCSF = listGO.AddComponent<ContentSizeFitter>();
-        listCSF.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        listVLG.childControlHeight     = true;
         listGO.AddComponent<LayoutElement>().flexibleHeight = 1;
 
         MenuMakeDivider(panelGO.transform, UITheme.SystemText, 1);

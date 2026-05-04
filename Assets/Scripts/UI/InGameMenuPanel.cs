@@ -76,7 +76,7 @@ namespace DnD.UI
             hlg.spacing                = 6;
             hlg.childForceExpandWidth  = false;
             hlg.childForceExpandHeight = true;
-            hlg.childControlWidth      = false;
+            hlg.childControlWidth      = true;   // honour each child's LayoutElement.preferredWidth
             hlg.childControlHeight     = true;
             var le = row.AddComponent<LayoutElement>();
             le.preferredHeight = 26;
@@ -132,7 +132,7 @@ namespace DnD.UI
             hlg.spacing = 6;
             hlg.childForceExpandWidth = false;
             hlg.childForceExpandHeight = true;
-            hlg.childControlWidth = false;
+            hlg.childControlWidth = true;
             hlg.childControlHeight = true;
             var le = row.AddComponent<LayoutElement>();
             le.preferredHeight = 26;
