@@ -42,6 +42,9 @@ namespace DnD.Data
 
         // Full per-tile grid state (captures EditMapPanel changes and map graph edits)
         public List<TileGridEntry> tileGrid = new List<TileGridEntry>();
+
+        // TTS preference (per-slot)
+        public bool audioAutoplay = false;
     }
 
     [Serializable]

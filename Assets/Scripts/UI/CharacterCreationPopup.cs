@@ -241,6 +241,7 @@ namespace DnD.UI
         // ── Quick Create ─────────────────────────────────────────────────
         private async Task QuickCreateAsync()
         {
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("Analyzing character…");
             if (quickStatusText != null) quickStatusText.text = "Analyzing your character...";
             if (nextButton != null) nextButton.interactable = false;
 
@@ -400,6 +401,7 @@ namespace DnD.UI
         /// <summary>Calls the LLM to suggest ability score allocation based on character description.</summary>
         private async Task SuggestAbilitiesAsync()
         {
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("Rolling abilities…");
             if (abilitySuggestButton != null) abilitySuggestButton.interactable = false;
             if (abilityStatusText   != null) abilityStatusText.text = "AI is suggesting scores...";
 
@@ -523,6 +525,7 @@ namespace DnD.UI
         // ── Portrait generation ──────────────────────────────────────────
         private async Task GeneratePortraitAsync()
         {
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("Painting portrait…");
             if (beginButton != null) beginButton.interactable = false;
 
             string raceName   = _raceSelected  ? _selectedRace.ToString()   : "Human";

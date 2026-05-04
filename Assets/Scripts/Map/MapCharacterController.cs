@@ -37,8 +37,8 @@ namespace DNDLLM.Map
             if (characterTex != null)
             {
                 float cs  = MapGenerator.Instance != null ? MapGenerator.Instance.cellSize : 1f;
-                // Character occupies 70 % of a tile so it stays within the cell bounds
-                float ppu = characterTex.width / (cs * 0.7f);
+                // Character occupies 55 % of a tile so it stays within the cell bounds
+                float ppu = characterTex.width / (cs * 0.55f);
                 var sprite = Sprite.Create(
                     characterTex,
                     new Rect(0, 0, characterTex.width, characterTex.height),

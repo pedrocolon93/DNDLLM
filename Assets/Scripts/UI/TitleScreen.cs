@@ -51,7 +51,7 @@ namespace DnD.UI
                 if (slotButtons == null || i >= slotButtons.Length || slotButtons[i] == null)
                     continue;
 
-                var (data, portrait) = SaveSystem.Load(i);
+                var (data, portrait, _) = SaveSystem.Load(i);
                 bool populated = data != null;
 
                 slotButtons[i].interactable = populated;

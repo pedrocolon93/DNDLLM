@@ -23,6 +23,14 @@ namespace DNDLLM.Map
         public int width  = 7;
         public int height = 7;
         public float cellSize = 1.0f;
+
+        [Header("Strategy D — holistic map")]
+        [Tooltip("Use the holistic-paint pipeline (one big LLM image + evaluate/refine loop) instead of per-tile generation.")]
+        public bool useStrategyD = true;
+        [Tooltip("Number of evaluate→refine iterations before accepting the map.")]
+        public int refinementRounds = 2;
+        [Tooltip("If true, the holistic prompt explicitly mentions a tile grid (stricter placement, more visible seams). False = seamless painting.")]
+        public bool strategyDGridMode = false;
         public string LastTheme => _lastTheme;
         private string _lastTheme = "stone dungeon";
         /// <summary>Set to true before calling GenerateMap to skip the LLM description call (use saved descriptions instead).</summary>
@@ -65,6 +73,8 @@ namespace DNDLLM.Map
             public bool[,]      walkable;
             public int          playerX, playerY;
             public Texture2D    styleAnchor;
+            // Strategy D: holistic background image (overrides per-tile visuals when set).
+            public Texture2D    backgroundImage;
         }
 
         [Header("Visuals")]
@@ -89,7 +99,145 @@ namespace DNDLLM.Map
 
         public async void GenerateMap(string keywords)
         {
+            if (useStrategyD)
+                await GenerateMapStrategyDAsync(keywords);
+            else
+                await GenerateMapPerTileAsync(keywords);
+        }
+
+        // ── Strategy D: holistic paint + evaluate/refine ────────────────────
+
+        private async Task GenerateMapStrategyDAsync(string keywords)
+        {
+            Debug.Log($"[MapGenerator-D] GenerateMap: {keywords}");
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("Painting map…");
+
+            foreach (Transform child in transform) Destroy(child.gameObject);
+
+            int size = Mathf.Min(width, height);
+            if (width != height)
+            {
+                Debug.LogWarning($"[MapGenerator-D] Strategy D requires a square grid; coercing to {size}x{size}.");
+                width = height = size;
+            }
+
+            string story = string.IsNullOrEmpty(keywords)
+                ? "A mysterious dungeon explored by adventurers."
+                : keywords;
+            _lastTheme = story.Split(',')[0].Trim();
+
+            if (DnD.UI.ChatUI.Instance != null)
+                DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Planning {size}x{size} logical grid...");
+
+            // Phase 1 — logical grid via LLM
+            LogicalGrid logical = await LLMService.Instance.GenerateLogicalGridAsync(size, story);
+            if (logical == null || logical.tiles == null || logical.tiles.Count == 0)
+            {
+                Debug.LogError("[MapGenerator-D] Logical grid generation failed; falling back to per-tile generator.");
+                await GenerateMapPerTileAsync(keywords);
+                return;
+            }
+
+            // Hydrate grid[,] from the logical grid (drives walkability, descriptions, spawns)
+            grid = new MapTile[width, height];
+            for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var lt = logical.GetTile(x, y)
+                       ?? new LogicalTile { x = x, y = y, terrain_type = "floor", description = "" };
+                bool walk = !LogicalGrid.IsBlockingTerrain(lt.terrain_type);
+                TileType type = walk ? TileType.Floor : TileType.Wall;
+                if (!string.IsNullOrEmpty(lt.feature)) type = FeatureToTileType(lt.feature);
+                string desc = string.IsNullOrEmpty(lt.feature) ? lt.description : $"{lt.feature}: {lt.description}";
+                grid[x, y] = new MapTile { x = x, y = y, type = type, walkable = walk, description = desc };
+            }
+
+            // Phase 2 — holistic base map
+            if (DnD.UI.ChatUI.Instance != null)
+                DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Painting holistic map (30-60s)...");
+
+            Texture2D current = await LLMService.Instance.GenerateHolisticMapAsync(logical, strategyDGridMode);
+            if (current == null)
+            {
+                Debug.LogError("[MapGenerator-D] Holistic map generation failed.");
+                if (DnD.UI.ChatUI.Instance != null)
+                    DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Map paint failed; aborting.");
+                return;
+            }
+
+            // Phase 3 — evaluate / refine loop
+            for (int round = 1; round <= refinementRounds; round++)
+            {
+                if (DnD.UI.ChatUI.Instance != null)
+                    DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Refinement round {round}/{refinementRounds}...");
+
+                string feedback = await LLMService.Instance.EvaluateMapImageAsync(current, logical);
+                if (string.IsNullOrEmpty(feedback)) break;
+
+                if (feedback.Trim().ToUpperInvariant().StartsWith("PERFECT"))
+                {
+                    if (DnD.UI.ChatUI.Instance != null)
+                        DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Evaluator says PERFECT after {round - 1} round(s).");
+                    break;
+                }
+
+                Texture2D refined = await LLMService.Instance.RefineMapImageAsync(current, feedback);
+                if (refined != null) current = refined;
+            }
+
+            // Phase 4 — bake the grid overlay into the texture
+            Texture2D withGrid = MapImageOverlay.DrawGridOverlay(current, size);
+            StyleAnchor = withGrid; // exposes the final image for debug / save
+
+            // Phase 5 — single background sprite spanning the whole grid
+            CreateBigBackgroundSprite(withGrid);
+
+            LogLayout();
+
+            if (DnD.UI.ChatUI.Instance != null)
+                DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Map ready.");
+
+            OnMapReady?.Invoke();
+            AdjustCamera();
+        }
+
+        private void CreateBigBackgroundSprite(Texture2D tex)
+        {
+            var go = new GameObject("MapBackground");
+            go.transform.parent   = transform;
+            // Centered so tile (0,0) world-pos lands on the image's (0,0) corner cell.
+            go.transform.position = new Vector3((width  - 1) * cellSize / 2f, 0f, (height - 1) * cellSize / 2f);
+            go.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sortingOrder = 0;
+            float worldW = width * cellSize;
+            float ppu    = tex.width / worldW;
+            sr.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), ppu);
+        }
+
+        /// <summary>Maps a free-text feature noun from the logical grid to one of the gameplay TileTypes.</summary>
+        private static TileType FeatureToTileType(string feature)
+        {
+            string f = (feature ?? "").ToLowerInvariant();
+            if (f.Contains("inn")     || f.Contains("tavern"))                  return TileType.Inn;
+            if (f.Contains("market")  || f.Contains("stall") || f.Contains("shop")) return TileType.Market;
+            if (f.Contains("fountain")|| f.Contains("well"))                    return TileType.Fountain;
+            if (f.Contains("door")    || f.Contains("gate"))                    return TileType.Door;
+            if (f.Contains("chest")   || f.Contains("treasure"))                return TileType.Chest;
+            if (f.Contains("monster") || f.Contains("lair") || f.Contains("enemy")) return TileType.EnemySpawn;
+            if (f.Contains("portal")  || f.Contains("exit") || f.Contains("stair")) return TileType.Exit;
+            if (f.Contains("npc")     || f.Contains("merchant") || f.Contains("guard")) return TileType.NpcSpawn;
+            if (f.Contains("house")   || f.Contains("hut") || f.Contains("home") || f.Contains("monastery") || f.Contains("armory")) return TileType.House;
+            return TileType.Floor;
+        }
+
+        // ── Per-tile path (legacy) ──────────────────────────────────────────
+
+        private async Task GenerateMapPerTileAsync(string keywords)
+        {
             Debug.Log($"[MapGenerator] GenerateMap: {keywords}");
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("Generating map tiles…");
 
             // Cleanup previous tile objects
             foreach (Transform child in transform)
@@ -595,18 +743,28 @@ namespace DNDLLM.Map
         /// <summary>Captures the entire current map state for later restoration.</summary>
         public MapSnapshot TakeSnapshot(int playerX, int playerY)
         {
+            // Strategy D: capture the painted background sprite (if present) so save/load round-trips it.
+            Texture2D bg = null;
+            var bgGO = transform.Find("MapBackground");
+            if (bgGO != null)
+            {
+                var sr = bgGO.GetComponent<SpriteRenderer>();
+                if (sr?.sprite != null) bg = sr.sprite.texture;
+            }
+
             var snap = new MapSnapshot
             {
-                lastTheme   = _lastTheme,
-                width       = width,
-                height      = height,
-                playerX     = playerX,
-                playerY     = playerY,
-                styleAnchor = StyleAnchor,
-                tileTypes   = new TileType[width, height],
-                tileDescs   = new string[width, height],
-                tileVisuals = new Texture2D[width, height],
-                walkable    = new bool[width, height],
+                lastTheme       = _lastTheme,
+                width           = width,
+                height          = height,
+                playerX         = playerX,
+                playerY         = playerY,
+                styleAnchor     = StyleAnchor,
+                backgroundImage = bg,
+                tileTypes       = new TileType[width, height],
+                tileDescs       = new string[width, height],
+                tileVisuals     = new Texture2D[width, height],
+                walkable        = new bool[width, height],
             };
             for (int x = 0; x < width; x++)
                 for (int y = 0; y < height; y++)
@@ -646,8 +804,13 @@ namespace DNDLLM.Map
                         visual      = snap.tileVisuals[x, y],
                         walkable    = snap.walkable[x, y],
                     };
-                    CreateTileVisual(x, y, snap.tileVisuals[x, y] ?? Texture2D.whiteTexture);
+                    // Strategy D: skip per-tile sprites when a background image is present.
+                    if (snap.backgroundImage == null)
+                        CreateTileVisual(x, y, snap.tileVisuals[x, y] ?? Texture2D.whiteTexture);
                 }
+
+            if (snap.backgroundImage != null)
+                CreateBigBackgroundSprite(snap.backgroundImage);
 
             AdjustCamera();
             OnMapReady?.Invoke();

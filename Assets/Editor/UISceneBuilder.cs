@@ -16,8 +16,17 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // ── Remove old Canvas ─────────────────────────────────────────
-        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(c.gameObject);
+
+        // ── EventSystem (required for any UI button to receive clicks) ─
+        if (Object.FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+        {
+            var esGO = new GameObject("EventSystem");
+            Undo.RegisterCreatedObjectUndo(esGO, "Create EventSystem");
+            esGO.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            esGO.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+        }
 
         // ── Canvas root ───────────────────────────────────────────────
         var canvasGO = new GameObject("Canvas");
@@ -248,9 +257,13 @@ public static class UISceneBuilder
         }
 
         // rightOffset: -8 = MENU, -102 = EDIT MAP, -196 = CHARACTER
+        // Leading glyphs must be ones LiberationSans actually contains, otherwise TMP
+        // logs "character not found" warnings and renders □. Safe picks: Math Operators
+        // (U+2200-22FF) and General Punctuation (U+2000-206F). Avoid Dingbats (U+2700-27BF)
+        // and most of Geometric Shapes (U+25A0-25FF) — not in LiberationSans.
         var menuBtn      = MakeHudButton("MenuButton",      "≡  MENU",      -8f);
-        var editMapBtn   = MakeHudButton("EditMapButton",   "✎  EDIT MAP",  -102f);
-        var characterBtn = MakeHudButton("CharacterButton", "◈  CHARACTER", -196f);
+        var editMapBtn   = MakeHudButton("EditMapButton",   "•  EDIT MAP",  -102f);
+        var characterBtn = MakeHudButton("CharacterButton", "†  CHARACTER", -196f);
 
         // Wire to GameManager if present
         var gameSystemGO = GameObject.Find("GameSystem");
@@ -271,12 +284,53 @@ public static class UISceneBuilder
         Debug.Log("[UISceneBuilder] Canvas rebuilt. Press Ctrl+S to save the scene.");
     }
 
+    // Names of root GameObjects that the builders create. CleanupScene destroys any
+    // matching root object so duplicates and script-orphaned canvases get swept away.
+    // GameSystem is intentionally excluded — it holds the LLMService API key and other
+    // serialized inspector values; SetupGameManager idempotently attaches missing components.
+    private static readonly string[] BuilderRootObjectNames =
+    {
+        "Canvas",
+        "MapCamera",
+        "MapCharacter",
+        "EventSystem",
+        "TitleScreenCanvas",
+        "AdventurePromptCanvas",
+        "CharacterPopupCanvas",
+        "EditMapCanvas",
+        "CharacterScreenCanvas",
+        "InGameMenuCanvas",
+    };
+
+    [MenuItem("DnD/Cleanup Scene")]
+    public static void CleanupScene()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+        int removed = 0;
+        foreach (var go in scene.GetRootGameObjects())
+        {
+            foreach (var n in BuilderRootObjectNames)
+            {
+                if (go.name == n)
+                {
+                    Undo.DestroyObjectImmediate(go);
+                    removed++;
+                    break;
+                }
+            }
+        }
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log($"[UISceneBuilder] CleanupScene removed {removed} builder-owned root GameObjects.");
+    }
+
     [MenuItem("DnD/Setup Scene (All Steps)")]
     public static void SetupSceneAll()
     {
+        CleanupScene();
         RebuildCanvas();
         SetupGameManager();
         BuildTitleScreen();
+        BuildAdventurePromptPopup();
         BuildCharacterPopup();
         BuildInGameMenuPanel();
         BuildEditMapPanel();
@@ -308,6 +362,36 @@ public static class UISceneBuilder
             Debug.Log("[UISceneBuilder] GameManager already present on GameSystem.");
         }
 
+        if (gameSystemGO.GetComponent<DNDLLM.Services.LLMService>() == null)
+        {
+            Undo.AddComponent<DNDLLM.Services.LLMService>(gameSystemGO);
+            Debug.Log("[UISceneBuilder] LLMService added to GameSystem — paste your API key into its Inspector.");
+        }
+
+        if (gameSystemGO.GetComponent<DNDLLM.Services.TTSService>() == null)
+        {
+            Undo.AddComponent<DNDLLM.Services.TTSService>(gameSystemGO);
+            Debug.Log("[UISceneBuilder] TTSService added to GameSystem.");
+        }
+
+        if (gameSystemGO.GetComponent<DNDLLM.Map.MapGenerator>() == null)
+        {
+            Undo.AddComponent<DNDLLM.Map.MapGenerator>(gameSystemGO);
+            Debug.Log("[UISceneBuilder] MapGenerator added to GameSystem.");
+        }
+
+        // MapCharacterController lives on its own GameObject because Initialize()
+        // moves the transform to the player's grid cell — putting it on GameSystem
+        // would drag every manager (GameManager, LLMService, MapGenerator) along with it.
+        if (Object.FindAnyObjectByType<DNDLLM.Map.MapCharacterController>() == null)
+        {
+            var charGO = new GameObject("MapCharacter");
+            Undo.RegisterCreatedObjectUndo(charGO, "Create MapCharacter");
+            charGO.AddComponent<SpriteRenderer>();
+            charGO.AddComponent<DNDLLM.Map.MapCharacterController>();
+            Debug.Log("[UISceneBuilder] MapCharacter GameObject created with MapCharacterController.");
+        }
+
         EditorSceneManager.MarkSceneDirty(scene);
     }
 
@@ -317,7 +401,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // Remove old TitleScreen canvas if present
-        foreach (var c in Object.FindObjectsByType<DnD.UI.TitleScreen>(FindObjectsSortMode.None))
+        foreach (var c in Object.FindObjectsByType<DnD.UI.TitleScreen>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(c.gameObject);
 
         // ── Canvas (sortingOrder=20, renders above everything) ─────────
@@ -525,7 +609,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // Remove old popup canvas
-        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterCreationPopup>(FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterCreationPopup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // ── Canvas (sortingOrder=10) ────────────────────────────────────
@@ -756,7 +840,7 @@ public static class UISceneBuilder
         suggestRT.anchorMin = Vector2.zero; suggestRT.anchorMax = Vector2.one;
         suggestRT.offsetMin = Vector2.zero; suggestRT.offsetMax = Vector2.zero;
         var suggestTMP = suggestTextGO.AddComponent<TextMeshProUGUI>();
-        suggestTMP.text = "✦ AI Suggest";
+        suggestTMP.text = "› AI Suggest";
         suggestTMP.fontSize = 10f;
         suggestTMP.color = UITheme.GoldAccent;
         suggestTMP.alignment = TextAlignmentOptions.Center;
@@ -1183,12 +1267,107 @@ public static class UISceneBuilder
         return btn;
     }
 
+    [MenuItem("DnD/Build Adventure Prompt Popup")]
+    public static void BuildAdventurePromptPopup()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        foreach (var p in Object.FindObjectsByType<DnD.UI.AdventurePromptPopup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            Undo.DestroyObjectImmediate(p.gameObject);
+
+        // Canvas (sortingOrder=17 — above EditMap=16, below TitleScreen=20)
+        var canvasGO = new GameObject("AdventurePromptCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build AdventurePromptPopup");
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 17;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        var popup = canvasGO.AddComponent<DnD.UI.AdventurePromptPopup>();
+
+        // Dark overlay (also catches background clicks so they don't leak through)
+        var overlayGO = MakeGO("Overlay", canvasGO.transform);
+        var overlayRT = overlayGO.GetComponent<RectTransform>();
+        overlayRT.anchorMin = Vector2.zero; overlayRT.anchorMax = Vector2.one;
+        overlayRT.offsetMin = Vector2.zero; overlayRT.offsetMax = Vector2.zero;
+        overlayGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.75f);
+
+        // Center panel (520 × 340)
+        var panelGO = MakeGO("Panel", overlayGO.transform);
+        var panelRT = panelGO.GetComponent<RectTransform>();
+        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        panelRT.sizeDelta        = new Vector2(520, 340);
+        panelRT.anchoredPosition = Vector2.zero;
+        panelGO.AddComponent<Image>().color = UITheme.BackgroundDeep;
+
+        var vlg = panelGO.AddComponent<VerticalLayoutGroup>();
+        vlg.padding                = new RectOffset(20, 20, 20, 20);
+        vlg.spacing                = 10;
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childControlWidth      = true;
+        vlg.childControlHeight     = true;
+
+        // Title
+        MenuMakeLabel(panelGO.transform, "DESCRIBE YOUR ADVENTURE", 18f, UITheme.GoldAccent,
+            TextAlignmentOptions.Center, 30);
+        MenuMakeDivider(panelGO.transform, UITheme.GoldAccent, 2);
+
+        // Subtitle / instruction
+        MenuMakeLabel(panelGO.transform,
+            "What kind of world do you want to explore?", 12f, UITheme.SystemText,
+            TextAlignmentOptions.Center, 20);
+
+        // Multiline input
+        var input = MakeInputField(panelGO.transform,
+            "A haunted forest where a forgotten god stirs...", true);
+        input.GetComponent<LayoutElement>().minHeight = 120;
+
+        // Button row
+        var rowGO = MakeGO("ButtonRow", panelGO.transform);
+        rowGO.AddComponent<LayoutElement>().preferredHeight = 40;
+        var rowHLG = rowGO.AddComponent<HorizontalLayoutGroup>();
+        rowHLG.spacing                = 12;
+        rowHLG.childForceExpandWidth  = true;
+        rowHLG.childForceExpandHeight = true;
+        rowHLG.childControlWidth      = true;
+        rowHLG.childControlHeight     = true;
+
+        var cancelBtn = MenuMakeButton(rowGO.transform, "CANCEL",         UITheme.SystemText, 40);
+        var beginBtn  = MenuMakeButton(rowGO.transform, "BEGIN ADVENTURE", UITheme.GoldAccent,  40);
+
+        // Wire serialized fields
+        var so = new SerializedObject(popup);
+        SetProp(so, "promptInput",  input);
+        SetProp(so, "beginButton",  beginBtn);
+        SetProp(so, "cancelButton", cancelBtn);
+        so.ApplyModifiedProperties();
+
+        // Wire onto GameManager
+        var gm = Object.FindAnyObjectByType<DnD.Managers.GameManager>();
+        if (gm != null)
+        {
+            var gmSO = new SerializedObject(gm);
+            var prop = gmSO.FindProperty("adventurePromptPopup");
+            if (prop != null) { prop.objectReferenceValue = popup; gmSO.ApplyModifiedProperties(); }
+        }
+
+        canvasGO.SetActive(false);
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] AdventurePromptPopup built. Press Ctrl+S to save.");
+    }
+
     [MenuItem("DnD/Build Edit Map Panel")]
     public static void BuildEditMapPanel()
     {
         var scene = EditorSceneManager.GetActiveScene();
 
-        foreach (var p in Object.FindObjectsByType<DnD.UI.EditMapPanel>(FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.EditMapPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // Canvas (sortingOrder=16 — above InGameMenu=15)
@@ -1240,7 +1419,7 @@ public static class UISceneBuilder
         hTMP.text = "EDIT MAP"; hTMP.fontSize = 16f;
         hTMP.color = UITheme.GoldAccent; hTMP.alignment = TextAlignmentOptions.MidlineLeft;
         hTMP.characterSpacing = 2f;
-        var closeHdrBtn = MenuMakeButton(headerGO.transform, "✕  Close", UITheme.SystemText, 28);
+        var closeHdrBtn = MenuMakeButton(headerGO.transform, "×  Close", UITheme.SystemText, 28);
         closeHdrBtn.GetComponent<LayoutElement>().preferredWidth = 80f;
         closeHdrBtn.onClick.AddListener(() => editPanel.Close());
 
@@ -1434,7 +1613,7 @@ public static class UISceneBuilder
     {
         var scene = EditorSceneManager.GetActiveScene();
 
-        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterScreenPanel>(FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterScreenPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // Canvas (sortingOrder=12)
@@ -1486,7 +1665,7 @@ public static class UISceneBuilder
         hTMP.text = "CHARACTER SHEET"; hTMP.fontSize = 16f;
         hTMP.color = UITheme.GoldAccent; hTMP.alignment = TextAlignmentOptions.MidlineLeft;
         hTMP.characterSpacing = 2f;
-        var closeHdrBtn = MenuMakeButton(headerGO.transform, "✕  Close", UITheme.SystemText, 28);
+        var closeHdrBtn = MenuMakeButton(headerGO.transform, "×  Close", UITheme.SystemText, 28);
         closeHdrBtn.GetComponent<LayoutElement>().preferredWidth = 80f;
         closeHdrBtn.onClick.AddListener(() => charPanel.Close());
 
@@ -1563,7 +1742,7 @@ public static class UISceneBuilder
             abTMP.fontSize         = 12f;
             abTMP.color            = UITheme.DmText;
             abTMP.alignment        = TextAlignmentOptions.Center;
-            abTMP.enableWordWrapping = false;
+            abTMP.textWrappingMode = TMPro.TextWrappingModes.NoWrap;
             abilityLabels[i] = abTMP;
         }
 
@@ -1609,7 +1788,7 @@ public static class UISceneBuilder
         var appearTextTMP = appearTextGO.AddComponent<TextMeshProUGUI>();
         appearTextTMP.fontSize = 11f; appearTextTMP.color = UITheme.SystemText;
         appearTextTMP.alignment = TextAlignmentOptions.TopLeft;
-        appearTextTMP.enableWordWrapping = true;
+        appearTextTMP.textWrappingMode = TMPro.TextWrappingModes.Normal;
 
         var backstoryLabelGO = MakeGO("BackstoryLabel", loreContentGO.transform);
         backstoryLabelGO.AddComponent<LayoutElement>().minHeight = 14f;
@@ -1623,7 +1802,7 @@ public static class UISceneBuilder
         var backstoryTextTMP = backstoryTextGO.AddComponent<TextMeshProUGUI>();
         backstoryTextTMP.fontSize = 11f; backstoryTextTMP.color = UITheme.DmText;
         backstoryTextTMP.alignment = TextAlignmentOptions.TopLeft;
-        backstoryTextTMP.enableWordWrapping = true;
+        backstoryTextTMP.textWrappingMode = TMPro.TextWrappingModes.Normal;
 
         // Wire CharacterScreenPanel fields
         var charSO = new SerializedObject(charPanel);
@@ -1658,7 +1837,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // Remove old panel
-        foreach (var p in Object.FindObjectsByType<DnD.UI.InGameMenuPanel>(FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.InGameMenuPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // ── Canvas (sortingOrder=15, above HUD but below TitleScreen=20) ─

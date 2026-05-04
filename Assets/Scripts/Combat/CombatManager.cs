@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using DnD.Core;
 using DnD.Character;
+using DnD.AI;
 
 namespace DnD.Combat
 {
@@ -24,8 +25,18 @@ namespace DnD.Combat
 
         private List<CombatantInitiative> initiativeOrder = new List<CombatantInitiative>();
         private int currentTurnIndex = 0;
+        private bool playerActedThisTurn = false;
+        private string lastAttackSummary = "";
 
         public System.Action<string> OnCombatMessage;
+        public System.Action OnPlayerTurnStart;
+        public System.Action OnPlayerTurnEnd;
+        public System.Action OnEnemyTurnStart;
+        public System.Action OnEnemyTurnEnd;
+        public System.Action<bool> OnCombatEnded; // true if victory
+
+        /// <summary>Called by the player-input handler once a combat command has been dispatched.</summary>
+        public void NotifyPlayerActed() => playerActedThisTurn = true;
 
         private class CombatantInitiative
         {
@@ -141,16 +152,19 @@ namespace DnD.Combat
 
             if (isPlayer)
             {
-                // Wait for player action (handled by UI/Input)
+                // Wait for the player to actually issue a combat command via the chat → DM pipeline.
                 currentState = BattleState.PlayerAction;
-                // This would normally wait for player input through events
-                yield return new WaitForSeconds(0.5f);
+                playerActedThisTurn = false;
+                OnPlayerTurnStart?.Invoke();
+                yield return new WaitUntil(() => playerActedThisTurn || !inCombat);
+                OnPlayerTurnEnd?.Invoke();
             }
             else
             {
-                // AI turn
                 currentState = BattleState.EnemyAction;
+                OnEnemyTurnStart?.Invoke();
                 yield return StartCoroutine(ExecuteEnemyTurn(character));
+                OnEnemyTurnEnd?.Invoke();
             }
         }
 
@@ -163,7 +177,20 @@ namespace DnD.Combat
             if (alivePlayerTargets.Count > 0)
             {
                 var target = alivePlayerTargets[Random.Range(0, alivePlayerTargets.Count)];
+                lastAttackSummary = "";
                 ExecuteAttack(enemy, target);
+
+                // Hand the mechanical summary off to the DM for in-character narration.
+                // Fire-and-forget — combat flow continues regardless of the LLM's latency.
+                if (DungeonMaster.Instance != null && !string.IsNullOrEmpty(lastAttackSummary))
+                {
+                    string summary = lastAttackSummary;
+                    string actor = enemy.characterName;
+                    string victim = target.characterName;
+                    _ = DungeonMaster.Instance.NarrateActionAsync(
+                        $"In combat: {actor} attacked {victim}. {summary}",
+                        "Combat narration — describe what just happened in 1-2 vivid sentences.");
+                }
             }
         }
 
@@ -178,14 +205,15 @@ namespace DnD.Combat
 
             if (attackRoll == 20)
             {
-                // Critical hit!
                 int damage = DiceRoller.RollDamage(weaponDamage, weaponDamageDie,
                     attacker.abilities.GetModifier(AbilityScore.Strength), isCritical: true);
                 target.TakeDamage(damage);
+                lastAttackSummary = $"Critical hit for {damage} damage. {target.characterName} HP {target.currentHitPoints}/{target.maxHitPoints}.";
                 OnCombatMessage?.Invoke($"CRITICAL HIT! {damage} damage dealt!");
             }
             else if (attackRoll == 1)
             {
+                lastAttackSummary = $"Critical miss — {attacker.characterName} fumbled.";
                 OnCombatMessage?.Invoke($"Critical miss!");
             }
             else if (totalAttack >= target.armorClass)
@@ -193,10 +221,12 @@ namespace DnD.Combat
                 int damage = DiceRoller.RollDamage(weaponDamage, weaponDamageDie,
                     attacker.abilities.GetModifier(AbilityScore.Strength));
                 target.TakeDamage(damage);
+                lastAttackSummary = $"Hit for {damage} damage. {target.characterName} HP {target.currentHitPoints}/{target.maxHitPoints}.";
                 OnCombatMessage?.Invoke($"Hit! {damage} damage dealt!");
             }
             else
             {
+                lastAttackSummary = $"Miss — attack roll {totalAttack} vs AC {target.armorClass}.";
                 OnCombatMessage?.Invoke($"Miss!");
             }
 
@@ -226,6 +256,9 @@ namespace DnD.Combat
             }
 
             initiativeOrder.Clear();
+            // Wake the player-turn WaitUntil so the coroutine can exit cleanly.
+            playerActedThisTurn = true;
+            OnCombatEnded?.Invoke(victory);
         }
 
         public CharacterStats GetCurrentTurnCharacter()

@@ -7,7 +7,9 @@ using DNDLLM.Map;
 namespace DnD.AI
 {
     /// <summary>
-    /// Parses and executes structured GM action blocks embedded in DM responses.
+    /// Parses and executes GM actions. Two paths:
+    ///   1. Native function-calls — DM provider returns LLMToolCall objects, dispatched via DispatchToolCall.
+    ///   2. Legacy text block — [GM_ACTIONS]…[/GM_ACTIONS] embedded in narration, parsed by ExecuteActions.
     ///
     /// Block format:
     ///   [GM_ACTIONS]
@@ -188,6 +190,198 @@ namespace DnD.AI
                         out_.Add($"Entering: {regionDesc}...");
                     }
                     break;
+            }
+        }
+
+        // ── Native function-call path ─────────────────────────────────────
+
+        [System.Serializable] private class MoveArgs        { public string target; public string direction; }
+        [System.Serializable] private class AmountArgs      { public string target; public int amount; }
+        [System.Serializable] private class ConditionArgs   { public string target; public string condition; }
+        [System.Serializable] private class SpawnEnemyArgs  { public string name; public int hp; public int ac; }
+        [System.Serializable] private class XpArgs          { public int amount; }
+        [System.Serializable] private class NameArgs        { public string name; }
+        [System.Serializable] private class CoordArgs       { public int x; public int y; }
+        [System.Serializable] private class DescArgs        { public string description; }
+
+        private static List<LLMTool> _toolDefs;
+
+        /// <summary>Tool catalogue advertised to the LLM. Schemas mirror the legacy text commands.</summary>
+        public static IList<LLMTool> GetToolDefinitions()
+        {
+            if (_toolDefs != null) return _toolDefs;
+            _toolDefs = new List<LLMTool>
+            {
+                new LLMTool("MOVE",
+                    "Move the player one tile in a cardinal direction.",
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"direction\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\"]}},\"required\":[\"target\",\"direction\"]}"),
+
+                new LLMTool("DAMAGE",
+                    "Deal damage to the player.",
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"target\",\"amount\"]}"),
+
+                new LLMTool("HEAL",
+                    "Heal the player by amount HP.",
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"target\",\"amount\"]}"),
+
+                new LLMTool("ADD_CONDITION",
+                    "Apply a D&D 5e condition to the player.",
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"condition\":{\"type\":\"string\"}},\"required\":[\"target\",\"condition\"]}"),
+
+                new LLMTool("REMOVE_CONDITION",
+                    "Remove a D&D 5e condition from the player.",
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"condition\":{\"type\":\"string\"}},\"required\":[\"target\",\"condition\"]}"),
+
+                new LLMTool("SPAWN_ENEMY",
+                    "Spawn a hostile creature and start combat.",
+                    "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"hp\":{\"type\":\"integer\",\"minimum\":1},\"ac\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"name\"]}"),
+
+                new LLMTool("AWARD_XP",
+                    "Grant experience points to the player.",
+                    "{\"type\":\"object\",\"properties\":{\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"amount\"]}"),
+
+                new LLMTool("KILL_ENTITY",
+                    "Remove a named entity from the map.",
+                    "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}"),
+
+                new LLMTool("LOCK_DOOR",
+                    "Make the tile at (x,y) impassable.",
+                    "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"x\",\"y\"]}"),
+
+                new LLMTool("UNLOCK_DOOR",
+                    "Make the tile at (x,y) passable.",
+                    "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"x\",\"y\"]}"),
+
+                new LLMTool("ENTER_SUBREGION",
+                    "Generate a child map and transition the player into it.",
+                    "{\"type\":\"object\",\"properties\":{\"description\":{\"type\":\"string\"}},\"required\":[\"description\"]}"),
+            };
+            return _toolDefs;
+        }
+
+        /// <summary>
+        /// Execute a single tool call from the LLM and return a short result string suitable for
+        /// feeding back as a "tool" role message in the next round.
+        /// </summary>
+        public static string DispatchToolCall(string toolName, string argsJson, CharacterStats player)
+        {
+            try
+            {
+                switch ((toolName ?? "").ToUpperInvariant())
+                {
+                    case "MOVE":
+                    {
+                        var a = JsonUtility.FromJson<MoveArgs>(argsJson) ?? new MoveArgs();
+                        var (dx, dy) = DirToVector(a.direction ?? "");
+                        if (dx == 0 && dy == 0) return $"Unknown direction: {a.direction}";
+                        bool ok = MapCharacterController.Instance?.TryMove(dx, dy) ?? false;
+                        return ok ? $"Player moved {a.direction}." : $"Move blocked: path to {a.direction} is impassable.";
+                    }
+
+                    case "DAMAGE":
+                    {
+                        var a = JsonUtility.FromJson<AmountArgs>(argsJson) ?? new AmountArgs();
+                        if (player == null) return "No player character available.";
+                        player.TakeDamage(a.amount);
+                        return $"Player took {a.amount} damage. HP {player.currentHitPoints}/{player.maxHitPoints}.";
+                    }
+
+                    case "HEAL":
+                    {
+                        var a = JsonUtility.FromJson<AmountArgs>(argsJson) ?? new AmountArgs();
+                        if (player == null) return "No player character available.";
+                        player.Heal(a.amount);
+                        return $"Player healed {a.amount} HP. HP {player.currentHitPoints}/{player.maxHitPoints}.";
+                    }
+
+                    case "ADD_CONDITION":
+                    {
+                        var a = JsonUtility.FromJson<ConditionArgs>(argsJson) ?? new ConditionArgs();
+                        if (player == null) return "No player character available.";
+                        if (!System.Enum.TryParse<Condition>(a.condition ?? "", true, out var cond))
+                            return $"Unknown condition: {a.condition}.";
+                        player.AddCondition(cond, 3);
+                        return $"Player is now {a.condition}.";
+                    }
+
+                    case "REMOVE_CONDITION":
+                    {
+                        var a = JsonUtility.FromJson<ConditionArgs>(argsJson) ?? new ConditionArgs();
+                        if (player == null) return "No player character available.";
+                        if (!System.Enum.TryParse<Condition>(a.condition ?? "", true, out var cond))
+                            return $"Unknown condition: {a.condition}.";
+                        player.RemoveCondition(cond);
+                        return $"Player is no longer {a.condition}.";
+                    }
+
+                    case "SPAWN_ENEMY":
+                    {
+                        var a = JsonUtility.FromJson<SpawnEnemyArgs>(argsJson) ?? new SpawnEnemyArgs();
+                        int hp = a.hp > 0 ? a.hp : 10;
+                        int ac = a.ac > 0 ? a.ac : 12;
+                        SpawnEnemy(a.name ?? "Creature", hp, ac);
+                        return $"{a.name ?? "Creature"} (HP {hp}, AC {ac}) spawned. Combat started.";
+                    }
+
+                    case "AWARD_XP":
+                    {
+                        var a = JsonUtility.FromJson<XpArgs>(argsJson) ?? new XpArgs();
+                        if (player == null) return "No player character available.";
+                        player.currentXP += a.amount;
+                        return $"Player gained {a.amount} XP (total {player.currentXP}).";
+                    }
+
+                    case "KILL_ENTITY":
+                    {
+                        var a = JsonUtility.FromJson<NameArgs>(argsJson) ?? new NameArgs();
+                        string target = (a.name ?? "").ToLower();
+                        for (int i = MapEntityController.All.Count - 1; i >= 0; i--)
+                        {
+                            var e = MapEntityController.All[i];
+                            if (e != null && e.EntityName.ToLower().Contains(target))
+                            {
+                                Object.Destroy(e.gameObject);
+                                return $"{e.EntityName} removed.";
+                            }
+                        }
+                        return $"No entity matching '{a.name}' found.";
+                    }
+
+                    case "LOCK_DOOR":
+                    {
+                        var a = JsonUtility.FromJson<CoordArgs>(argsJson) ?? new CoordArgs();
+                        var gen = MapGenerator.Instance;
+                        if (gen?.grid == null || a.x < 0 || a.x >= gen.width || a.y < 0 || a.y >= gen.height)
+                            return $"Invalid coords ({a.x},{a.y}).";
+                        gen.grid[a.x, a.y].walkable = false;
+                        return $"Tile ({a.x},{a.y}) is now barred.";
+                    }
+
+                    case "UNLOCK_DOOR":
+                    {
+                        var a = JsonUtility.FromJson<CoordArgs>(argsJson) ?? new CoordArgs();
+                        var gen = MapGenerator.Instance;
+                        if (gen?.grid == null || a.x < 0 || a.x >= gen.width || a.y < 0 || a.y >= gen.height)
+                            return $"Invalid coords ({a.x},{a.y}).";
+                        gen.grid[a.x, a.y].walkable = true;
+                        return $"Tile ({a.x},{a.y}) is now open.";
+                    }
+
+                    case "ENTER_SUBREGION":
+                    {
+                        var a = JsonUtility.FromJson<DescArgs>(argsJson) ?? new DescArgs();
+                        Managers.GameManager.Instance?.RequestSubregionEntry(a.description ?? "");
+                        return $"Entering subregion: {a.description}.";
+                    }
+
+                    default:
+                        return $"Unknown tool: {toolName}.";
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[GMToolExecutor] Tool '{toolName}' failed: {e.Message}");
+                return $"Tool '{toolName}' failed: {e.Message}";
             }
         }
 
