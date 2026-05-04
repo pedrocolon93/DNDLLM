@@ -1,4 +1,5 @@
 // Assets/Scripts/UI/ChatUI.cs
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -94,6 +95,17 @@ namespace DnD.UI
             activeMessages.Clear();
         }
 
+        /// <summary>Enable/disable the player's text input (used during enemy turns / DM thinking).</summary>
+        public void SetInputEnabled(bool enabled)
+        {
+            if (inputField != null)
+            {
+                inputField.interactable = enabled;
+                if (!enabled) inputField.DeactivateInputField();
+            }
+            if (sendButton != null) sendButton.interactable = enabled;
+        }
+
         /// <summary>Returns a snapshot of all visible messages for saving.</summary>
         public List<ChatMessageData> GetMessageHistory()
         {
@@ -168,6 +180,11 @@ namespace DnD.UI
                     tmp.fontSize = UITheme.FontDM;
                     tmp.fontStyle = FontStyles.Italic;
                     tmp.alignment = TextAlignmentOptions.TopLeft;
+                    AttachPlayButton(msgGO, text);
+                    if (DNDLLM.Services.TTSService.Instance != null
+                        && DNDLLM.Services.TTSService.Instance.Enabled
+                        && DNDLLM.Services.TTSService.Instance.AutoPlay)
+                        DNDLLM.Services.TTSService.Instance.PlayAsync(text);
                     break;
 
                 case MessageType.Player:
@@ -221,6 +238,11 @@ namespace DnD.UI
             tmp.text = "";
 
             activeMessages.Add(msgGO);
+            AttachPlayButton(msgGO, fullText);
+            if (DNDLLM.Services.TTSService.Instance != null
+                && DNDLLM.Services.TTSService.Instance.Enabled
+                && DNDLLM.Services.TTSService.Instance.AutoPlay)
+                DNDLLM.Services.TTSService.Instance.PlayAsync(fullText);
             TrimHistory();
 
             foreach (char c in fullText)
@@ -265,5 +287,70 @@ namespace DnD.UI
         }
 
         public enum MessageType { Player, DM, System }
+
+        // Glyphs picked from blocks LiberationSans actually contains; avoids the
+        // "character not found" warnings that ▶ / ■ would trigger without a Symbols fallback.
+        private const string PlayGlyph = "›";
+        private const string StopGlyph = "×";
+
+        /// <summary>Attach a play/stop TTS button to a DM message bubble. No-op if TTSService is missing or disabled.</summary>
+        private void AttachPlayButton(GameObject bubble, string text)
+        {
+            var tts = DNDLLM.Services.TTSService.Instance;
+            if (tts == null || !tts.Enabled) return;
+
+            var btnGO = new GameObject("TTSButton", typeof(RectTransform));
+            btnGO.transform.SetParent(bubble.transform, false);
+            var rt = btnGO.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1, 1); rt.anchorMax = new Vector2(1, 1);
+            rt.pivot     = new Vector2(1, 1);
+            rt.sizeDelta = new Vector2(28, 22);
+            rt.anchoredPosition = new Vector2(-4, -4);
+
+            var img = btnGO.AddComponent<Image>();
+            img.color = new Color(0.15f, 0.1f, 0.05f, 0.8f);
+            var btn = btnGO.AddComponent<Button>();
+            btn.targetGraphic = img;
+
+            var textGO = new GameObject("Label", typeof(RectTransform));
+            textGO.transform.SetParent(btnGO.transform, false);
+            var trt = textGO.GetComponent<RectTransform>();
+            trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+            trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
+            var tmp = textGO.AddComponent<TextMeshProUGUI>();
+            tmp.text = PlayGlyph;
+            tmp.fontSize = 14f;
+            tmp.color = UITheme.GoldAccent;
+            tmp.alignment = TextAlignmentOptions.Center;
+
+            string snapshot = text;
+            btn.onClick.AddListener(() =>
+            {
+                var live = DNDLLM.Services.TTSService.Instance;
+                if (live == null) return;
+                if (tmp.text == StopGlyph) live.Stop();
+                else                       live.PlayAsync(snapshot);
+            });
+
+            Action<string> onStart = s => { if (s == snapshot) tmp.text = StopGlyph; };
+            Action<string> onStop  = s => { if (s == snapshot) tmp.text = PlayGlyph; };
+            tts.OnPlaybackStarted += onStart;
+            tts.OnPlaybackStopped += onStop;
+
+            var cleanup = btnGO.AddComponent<TTSButtonCleanup>();
+            cleanup.OnDestroyed = () =>
+            {
+                var s = DNDLLM.Services.TTSService.Instance;
+                if (s == null) return;
+                s.OnPlaybackStarted -= onStart;
+                s.OnPlaybackStopped -= onStop;
+            };
+        }
+    }
+
+    internal class TTSButtonCleanup : MonoBehaviour
+    {
+        public Action OnDestroyed;
+        private void OnDestroy() { OnDestroyed?.Invoke(); }
     }
 }
