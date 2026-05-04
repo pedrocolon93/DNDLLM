@@ -554,6 +554,16 @@ namespace DNDLLM.Services
                 }
                 sb.Append(']');
             }
+            else if (!string.IsNullOrEmpty(m.ImageDataUrl))
+            {
+                // Multimodal user content: array of [text part, image_url part]. The base64 inside
+                // the URL only needs JSON-string-level escaping for quotes/backslashes — the data
+                // itself uses a URL-safe alphabet — but EscapeJson is cheap and safe to apply.
+                sb.Append(",\"content\":[")
+                  .Append("{\"type\":\"text\",\"text\":\"").Append(EscapeJson(m.Content ?? "")).Append("\"},")
+                  .Append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"").Append(EscapeJson(m.ImageDataUrl)).Append("\"}}")
+                  .Append(']');
+            }
             else
             {
                 sb.Append(",\"content\":\"").Append(EscapeJson(m.Content ?? "")).Append('"');

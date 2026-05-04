@@ -61,10 +61,17 @@ namespace DnD.AI
         public List<LLMToolCall> ToolCalls; // assistant turns only
         public string ToolCallId;           // tool turns only - matches the assistant's call id
         public string Name;                 // optional, for "tool" role
+        public string ImageDataUrl;         // user turns only - "data:image/png;base64,…" attachment
 
         public static LLMChatMessage System(string content)    => new LLMChatMessage { Role = "system",    Content = content };
         public static LLMChatMessage User(string content)      => new LLMChatMessage { Role = "user",      Content = content };
         public static LLMChatMessage Assistant(string content) => new LLMChatMessage { Role = "assistant", Content = content };
+        public static LLMChatMessage UserWithImage(string content, string imageDataUrl) => new LLMChatMessage
+        {
+            Role = "user",
+            Content = content,
+            ImageDataUrl = imageDataUrl,
+        };
         public static LLMChatMessage AssistantToolCalls(List<LLMToolCall> calls) => new LLMChatMessage
         {
             Role = "assistant",
