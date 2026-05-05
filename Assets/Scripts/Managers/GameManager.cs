@@ -118,7 +118,6 @@ namespace DnD.Managers
                 {
                     inGameMenuPanel.OnSave            = OnSaveFromMenu;
                     inGameMenuPanel.OnLoad            = OnLoadFromMenu;
-                    inGameMenuPanel.OnRegenerateTile  = OnRegenerateTileFromMenu;
                     inGameMenuPanel.OnTTSEnabledChanged = v =>
                     {
                         if (DNDLLM.Services.TTSService.Instance != null)
@@ -462,13 +461,6 @@ namespace DnD.Managers
         {
             inGameMenuPanel?.Close();
             ChangeState(GameState.MainMenu);
-        }
-
-        private async void OnRegenerateTileFromMenu(int x, int y)
-        {
-            inGameMenuPanel?.Close();
-            if (MapGenerator.Instance != null)
-                await MapGenerator.Instance.RegenerateTileAsync(x, y);
         }
 
         private void OnSaveButtonPressed()

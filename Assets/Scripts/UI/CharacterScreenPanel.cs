@@ -25,11 +25,24 @@ namespace DnD.UI
         [SerializeField] private TMP_Text[] abilityLabels;
         [SerializeField] private TMP_Text   appearanceText;
         [SerializeField] private TMP_Text   backstoryText;
+        [SerializeField] private Button     closeButton;
 
         private void Awake()
         {
             if (Instance == null) Instance = this;
             else { Destroy(gameObject); return; }
+        }
+
+        // The editor-time AddListener calls in UISceneBuilder are non-persistent and don't
+        // survive scene save. Re-bind here every time the panel is opened so the × Close
+        // button actually fires regardless of editor vs. play-mode entry path.
+        private void OnEnable()
+        {
+            if (closeButton != null)
+            {
+                closeButton.onClick.RemoveAllListeners();
+                closeButton.onClick.AddListener(Close);
+            }
         }
 
         // ── Public API ───────────────────────────────────────────────────────
