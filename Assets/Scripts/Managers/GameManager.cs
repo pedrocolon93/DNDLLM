@@ -29,8 +29,23 @@ namespace DnD.Managers
         [SerializeField] private GameState currentState = GameState.MainMenu;
 
         [Header("Player Configuration")]
+        // playerCharacter is the *active* turn owner; kept as a [SerializeField] for the
+        // ~50 existing call sites. CurrentPlayer (below) is the multi-player-aware accessor.
         [SerializeField] private CharacterStats playerCharacter;
-        [SerializeField] private List<CharacterStats> partyMembers = new List<CharacterStats>();
+        [SerializeField] private List<CharacterStats> playerCharacters = new List<CharacterStats>();
+        [SerializeField] private List<CharacterStats> partyMembers     = new List<CharacterStats>();
+        [SerializeField] private int currentPlayerIndex = 0;
+
+        /// <summary>The party member whose turn it is right now. Mirrors playerCharacter.</summary>
+        public CharacterStats CurrentPlayer => (playerCharacters != null && currentPlayerIndex >= 0 && currentPlayerIndex < playerCharacters.Count)
+            ? playerCharacters[currentPlayerIndex] : playerCharacter;
+
+        /// <summary>Read-only view of the party. Single-player saves yield a 1-element list.</summary>
+        public IReadOnlyList<CharacterStats> Party => playerCharacters;
+
+        /// <summary>Drives the turn-order HUD strip and (eventually) gates exploration input. Combat still
+        /// uses CombatManager's own initiative for now; the queue is rebuilt at the encounter boundary.</summary>
+        public readonly DnD.Core.TurnQueue Turns = new DnD.Core.TurnQueue();
 
         [Header("AI Configuration")]
         [SerializeField] private bool useMockLLM = true; // Set to false when using real LLM
@@ -45,6 +60,7 @@ namespace DnD.Managers
         [SerializeField] private DnD.UI.EditMapPanel            editMapPanel;
         [SerializeField] private UnityEngine.UI.Button          characterButton;
         [SerializeField] private DnD.UI.CharacterScreenPanel    characterScreenPanel;
+        [SerializeField] private TMPro.TextMeshProUGUI          turnStripText;
 
         private int _currentSlotIndex = 0;
         private string _campaignSeed = "";
@@ -140,6 +156,10 @@ namespace DnD.Managers
                 if (characterButton != null)
                     characterButton.onClick.AddListener(OnCharacterButtonPressed);
 
+                // Drive the turn-order HUD strip off the queue so it stays in sync without polling.
+                Turns.OnTurnChanged += RefreshTurnStrip;
+                RefreshTurnStrip();
+
                 ChangeState(GameState.MainMenu);
                 _initStatus = "ready - state: " + currentState;
             }
@@ -186,6 +206,35 @@ namespace DnD.Managers
             }
 
             OnMenuButtonPressed();
+        }
+
+        // ── Turn-order strip ─────────────────────────────────────────────
+        // Reads the TurnQueue and renders it as "▶ Aric → Lyra → Goblin" with the active
+        // entry styled gold/bold. Hidden entirely when the queue is empty (e.g. MainMenu).
+        private void RefreshTurnStrip()
+        {
+            if (turnStripText == null) return;
+            int count = Turns.Count;
+            if (count == 0)
+            {
+                turnStripText.text = "";
+                turnStripText.gameObject.SetActive(false);
+                return;
+            }
+            turnStripText.gameObject.SetActive(true);
+
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < count; i++)
+            {
+                var e = Turns.Order[i];
+                if (e == null) continue;
+                if (i > 0) sb.Append("  →  ");
+                bool active = (i == Turns.CurrentIndex);
+                if (active)        sb.Append("<b><color=#C8A050>▶ ").Append(e.DisplayName).Append("</color></b>");
+                else if (e.IsPlayer) sb.Append("<color=#A08060>").Append(e.DisplayName).Append("</color>");
+                else                 sb.Append("<color=#7A5A40>").Append(e.DisplayName).Append("</color>");
+            }
+            turnStripText.text = sb.ToString();
         }
 
         private static bool TryClose(MonoBehaviour panel)
@@ -488,6 +537,14 @@ namespace DnD.Managers
                 playerCharacter = go.AddComponent<DnD.Character.CharacterStats>();
                 DontDestroyOnLoad(go);
             }
+            // Register the active character into the party list (1-element today,
+            // up to 4 once the multi-player creation flow lands). The TurnQueue is
+            // then rebuilt with this party — single entry rotates trivially.
+            if (!playerCharacters.Contains(playerCharacter))
+                playerCharacters.Add(playerCharacter);
+            currentPlayerIndex = playerCharacters.IndexOf(playerCharacter);
+            Turns.BeginExploration(playerCharacters);
+
             playerCharacter.characterName = data.characterName;
             playerCharacter.race          = data.race;
 
@@ -595,11 +652,57 @@ namespace DnD.Managers
                 entitySprites.Add(sr != null && sr.sprite != null ? sr.sprite.texture as UnityEngine.Texture2D : null);
             }
 
+            // ── Multi-player party state ─────────────────────────────────────
+            // Populate players[] alongside the legacy flat fields. New saves are
+            // dual-format so they can be loaded by both old and new builds.
+            saveData.players = new List<DnD.Data.PlayerSaveEntry>();
+            for (int i = 0; i < playerCharacters.Count; i++)
+            {
+                var p = playerCharacters[i];
+                if (p == null) continue;
+                bool isCurrent = ReferenceEquals(p, playerCharacter);
+                int gx = 0, gy = 0;
+                var ctrl = MapCharacterController.For(p);
+                if (ctrl != null) { gx = ctrl.GridX; gy = ctrl.GridY; }
+                saveData.players.Add(new DnD.Data.PlayerSaveEntry
+                {
+                    characterName         = p.characterName,
+                    raceName              = p.race.ToString(),
+                    className             = p.characterClass != null ? p.characterClass.className.ToString() : "",
+                    appearanceDescription = isCurrent ? _appearanceDescription : "",
+                    backstory             = isCurrent ? _backstory             : "",
+                    level                 = p.level,
+                    maxHP                 = p.maxHitPoints,
+                    currentHP             = p.currentHitPoints,
+                    armorClass            = p.armorClass,
+                    str                   = p.abilities.GetScore(AbilityScore.Strength),
+                    dex                   = p.abilities.GetScore(AbilityScore.Dexterity),
+                    con                   = p.abilities.GetScore(AbilityScore.Constitution),
+                    intel                 = p.abilities.GetScore(AbilityScore.Intelligence),
+                    wis                   = p.abilities.GetScore(AbilityScore.Wisdom),
+                    cha                   = p.abilities.GetScore(AbilityScore.Charisma),
+                    gridX                 = gx,
+                    gridY                 = gy,
+                });
+            }
+            saveData.currentPlayerIndex = currentPlayerIndex;
+
             UnityEngine.Texture2D savePortrait = portrait ?? _characterPortrait;
             DNDLLM.Services.SaveSystem.Save(
                 _currentSlotIndex, saveData,
                 savePortrait, _characterMapToken, savedMapBackground, entitySprites);
-            Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel} ({saveData.entities.Count} entities, map={(savedMapBackground != null ? "yes" : "no")})");
+            // Per-player image files are written for index ≥ 1; index 0 already maps to
+            // the legacy slot_{i}_portrait.png + slot_{i}_token.png written by Save above.
+            for (int i = 1; i < playerCharacters.Count; i++)
+            {
+                // Today the only sprites we have per-character are for the lead character;
+                // additional party members will get portraits/tokens once multi-character
+                // creation lands. The Save call is harmless when textures are null.
+                DNDLLM.Services.SaveSystem.SavePlayerImage(_currentSlotIndex, i, DNDLLM.Services.SaveSystem.PlayerImageKind.Portrait, null);
+                DNDLLM.Services.SaveSystem.SavePlayerImage(_currentSlotIndex, i, DNDLLM.Services.SaveSystem.PlayerImageKind.MapToken, null);
+            }
+            Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel} " +
+                      $"({saveData.entities.Count} entities, {saveData.players.Count} player(s), map={(savedMapBackground != null ? "yes" : "no")})");
         }
 
         private void LoadSlot(int slotIndex)
@@ -666,6 +769,41 @@ namespace DnD.Managers
 
             if (System.Enum.TryParse<Race>(data.raceName, out var parsedRace))
                 playerCharacter.race = parsedRace;
+
+            // Multi-player: rebuild the party list from data.players[] when present.
+            // Legacy saves (players.Count == 0) → 1-element list using the playerCharacter
+            // we just populated from the flat fields, preserving single-player behaviour.
+            playerCharacters.Clear();
+            playerCharacters.Add(playerCharacter);
+            if (data.players != null && data.players.Count > 1)
+            {
+                for (int i = 1; i < data.players.Count; i++)
+                {
+                    var p = data.players[i];
+                    var go = new GameObject($"Player_{i}");
+                    DontDestroyOnLoad(go);
+                    var cs = go.AddComponent<DnD.Character.CharacterStats>();
+                    cs.characterName    = p.characterName;
+                    cs.level            = p.level;
+                    cs.maxHitPoints     = p.maxHP;
+                    cs.currentHitPoints = p.currentHP;
+                    cs.armorClass       = p.armorClass;
+                    cs.abilities        = new AbilityScores(p.str, p.dex, p.con, p.intel, p.wis, p.cha);
+                    if (!string.IsNullOrEmpty(p.className) && System.Enum.TryParse<CharacterClassName>(p.className, out var cls))
+                    {
+                        int hd = cls == CharacterClassName.Fighter ? 10
+                               : cls == CharacterClassName.Wizard  ?  6
+                               : cls == CharacterClassName.Rogue   ?  8 : 8;
+                        cs.characterClass = CreateBasicClass(cls, hd);
+                    }
+                    if (System.Enum.TryParse<Race>(p.raceName, out var rc)) cs.race = rc;
+                    playerCharacters.Add(cs);
+                }
+            }
+            currentPlayerIndex = (data.currentPlayerIndex >= 0 && data.currentPlayerIndex < playerCharacters.Count)
+                ? data.currentPlayerIndex : 0;
+            playerCharacter = playerCharacters[currentPlayerIndex];
+            Turns.BeginExploration(playerCharacters);
 
             if (!string.IsNullOrEmpty(data.campaignTimeline))
                 currentCampaign = new StoryTimeline
@@ -944,6 +1082,9 @@ namespace DnD.Managers
             }
 
             MapCharacterController.Instance.Initialize(charTex, startX, startY);
+            // Tag the controller with the active CharacterStats so multi-player tools can
+            // resolve "move/damage <name>" via MapCharacterController.For(stats).
+            MapCharacterController.Instance.Stats = playerCharacter;
         }
 
         // ── Sub-map traversal (MapGraph-backed) ──────────────────────────────
