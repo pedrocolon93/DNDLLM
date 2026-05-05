@@ -1,6 +1,9 @@
 using UnityEngine;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Text;
+using DnD.AI;
 
 namespace DNDLLM.Services
 {
@@ -16,6 +19,7 @@ namespace DNDLLM.Services
 
         [Header("OpenRouter")]
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
+        public string ApiKey => apiKey;
         [SerializeField] private string model = "openai/gpt-4o-mini";
         [SerializeField] private string imageModel = "openai/dall-e-3";
 
@@ -25,6 +29,9 @@ namespace DNDLLM.Services
 
         [Header("Cache")]
         [SerializeField] private bool useCache = true;
+
+        [Header("Strategy D — vision evaluator")]
+        [SerializeField] private string evalModel = "openai/gpt-4o-mini"; // any vision-capable OpenRouter model
 
         private void Awake()
         {
@@ -410,6 +417,380 @@ namespace DNDLLM.Services
                     .Replace("\n",  "\\n")
                     .Replace("\r",  "\\r")
                     .Replace("\t",  "\\t");
+        }
+
+        // ── Tool-aware chat (OpenAI-compatible function calling) ─────────────
+
+        [System.Serializable] private class ToolFunctionDto { public string name; public string arguments; }
+        [System.Serializable] private class ToolCallDto     { public string id; public string type; public ToolFunctionDto function; }
+        [System.Serializable] private class MessageWithToolsDto { public string role; public string content; public List<ToolCallDto> tool_calls; }
+        [System.Serializable] private class ChoiceWithToolsDto  { public MessageWithToolsDto message; }
+        [System.Serializable] private class ResponseWithToolsDto { public List<ChoiceWithToolsDto> choices; }
+
+        public async Task<LLMChatResult> ChatWithToolsAsync(
+            IList<LLMChatMessage> messages,
+            IList<LLMTool> tools,
+            CancellationToken ct = default)
+        {
+            string url, modelName, authToken;
+            if (provider == LLMProvider.Ollama)
+            {
+                url = $"{ollamaBaseUrl.TrimEnd('/')}/v1/chat/completions";
+                modelName = ollamaModel;
+                authToken = null;
+            }
+            else
+            {
+                url = "https://openrouter.ai/api/v1/chat/completions";
+                modelName = model;
+                authToken = apiKey;
+            }
+
+            string body = BuildChatToolsRequestJson(modelName, messages, tools);
+
+            using (var request = new UnityEngine.Networking.UnityWebRequest(url, "POST"))
+            {
+                byte[] bodyRaw = Encoding.UTF8.GetBytes(body);
+                request.uploadHandler   = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
+                request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+
+                if (!string.IsNullOrEmpty(authToken))
+                {
+                    request.SetRequestHeader("Authorization", $"Bearer {authToken}");
+                    request.SetRequestHeader("HTTP-Referer", "https://github.com/google-deepmind/antigravity");
+                    request.SetRequestHeader("X-Title", "DNDLLM");
+                }
+
+                var op = request.SendWebRequest();
+                while (!op.isDone)
+                {
+                    if (ct.IsCancellationRequested) { request.Abort(); ct.ThrowIfCancellationRequested(); }
+                    await Task.Yield();
+                }
+
+                if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"[LLMService] Tool chat error ({url}): {request.error} — {request.downloadHandler.text}");
+                    return new LLMChatResult { Text = "Error calling LLM API." };
+                }
+
+                string raw = request.downloadHandler.text;
+                Debug.Log($"[LLMService] Tool chat response: {raw}");
+                return ParseChatToolsResponse(raw);
+            }
+        }
+
+        private static string BuildChatToolsRequestJson(string modelName, IList<LLMChatMessage> messages, IList<LLMTool> tools)
+        {
+            var sb = new StringBuilder(1024);
+            sb.Append('{');
+            sb.Append("\"model\":\"").Append(EscapeJson(modelName)).Append('"');
+
+            // messages
+            sb.Append(",\"messages\":[");
+            for (int i = 0; i < messages.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                AppendMessage(sb, messages[i]);
+            }
+            sb.Append(']');
+
+            // tools
+            if (tools != null && tools.Count > 0)
+            {
+                sb.Append(",\"tools\":[");
+                for (int i = 0; i < tools.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    var t = tools[i];
+                    sb.Append("{\"type\":\"function\",\"function\":{\"name\":\"")
+                      .Append(EscapeJson(t.Name))
+                      .Append("\",\"description\":\"")
+                      .Append(EscapeJson(t.Description))
+                      .Append("\",\"parameters\":")
+                      .Append(t.ParametersJsonSchema)
+                      .Append("}}");
+                }
+                sb.Append(']');
+                sb.Append(",\"tool_choice\":\"auto\"");
+            }
+
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static void AppendMessage(StringBuilder sb, LLMChatMessage m)
+        {
+            sb.Append('{');
+            sb.Append("\"role\":\"").Append(EscapeJson(m.Role)).Append('"');
+
+            if (m.Role == "tool")
+            {
+                sb.Append(",\"tool_call_id\":\"").Append(EscapeJson(m.ToolCallId ?? "")).Append('"');
+                if (!string.IsNullOrEmpty(m.Name))
+                    sb.Append(",\"name\":\"").Append(EscapeJson(m.Name)).Append('"');
+                sb.Append(",\"content\":\"").Append(EscapeJson(m.Content ?? "")).Append('"');
+            }
+            else if (m.ToolCalls != null && m.ToolCalls.Count > 0)
+            {
+                // assistant-with-tool-calls: content may be null
+                if (m.Content != null)
+                    sb.Append(",\"content\":\"").Append(EscapeJson(m.Content)).Append('"');
+                else
+                    sb.Append(",\"content\":null");
+
+                sb.Append(",\"tool_calls\":[");
+                for (int j = 0; j < m.ToolCalls.Count; j++)
+                {
+                    if (j > 0) sb.Append(',');
+                    var c = m.ToolCalls[j];
+                    sb.Append("{\"id\":\"").Append(EscapeJson(c.Id))
+                      .Append("\",\"type\":\"function\",\"function\":{\"name\":\"")
+                      .Append(EscapeJson(c.Name))
+                      .Append("\",\"arguments\":\"")
+                      .Append(EscapeJson(c.ArgumentsJson ?? "{}"))
+                      .Append("\"}}");
+                }
+                sb.Append(']');
+            }
+            else if (!string.IsNullOrEmpty(m.ImageDataUrl))
+            {
+                // Multimodal user content: array of [text part, image_url part]. The base64 inside
+                // the URL only needs JSON-string-level escaping for quotes/backslashes — the data
+                // itself uses a URL-safe alphabet — but EscapeJson is cheap and safe to apply.
+                sb.Append(",\"content\":[")
+                  .Append("{\"type\":\"text\",\"text\":\"").Append(EscapeJson(m.Content ?? "")).Append("\"},")
+                  .Append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"").Append(EscapeJson(m.ImageDataUrl)).Append("\"}}")
+                  .Append(']');
+            }
+            else
+            {
+                sb.Append(",\"content\":\"").Append(EscapeJson(m.Content ?? "")).Append('"');
+            }
+
+            sb.Append('}');
+        }
+
+        // ── Strategy D: holistic map generation + evaluate/refine loop ────
+
+        /// <summary>
+        /// Asks the LLM to distribute story elements across an NxN logical grid.
+        /// Returns a LogicalGrid with terrain_type/feature/description per cell.
+        /// </summary>
+        public async Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story)
+        {
+            string sys = "You are a DND map architect. You output ONLY valid JSON matching the requested schema — no prose, no markdown fences.";
+            string usr =
+                $"Create a logical {size}x{size} grid for this story:\n{story}\n\n" +
+                $"Distribute the major elements (buildings, terrain changes, points of interest) across tiles logically. " +
+                $"Adjacent tiles must flow naturally into one another (no abrupt biome changes).\n\n" +
+                $"Output JSON of the form:\n" +
+                $"{{\"size\": {size}, \"tiles\": [ {{\"x\":0,\"y\":0,\"terrain_type\":\"grass\",\"feature\":\"tavern\",\"description\":\"A bustling tavern\"}}, ... ]}}\n\n" +
+                $"Rules:\n" +
+                $"- Include EVERY cell from (0,0) to ({size-1},{size-1}). That is exactly {size*size} tiles.\n" +
+                $"- terrain_type is one short keyword: grass, dirt, stone, water, sand, wood, cobble, wall, cliff, void.\n" +
+                $"- feature is a short noun (tavern, monastery, armory, well, statue, tree, ...) or empty string if none.\n" +
+                $"- description is one short sentence for the image generator.";
+            string raw = await SendPrompt(sys, usr);
+            if (string.IsNullOrEmpty(raw)) return null;
+
+            // Strip markdown fences if the model included them despite the system instruction.
+            raw = raw.Trim();
+            if (raw.StartsWith("```"))
+            {
+                int firstNl = raw.IndexOf('\n');
+                if (firstNl >= 0) raw = raw.Substring(firstNl + 1);
+                int fence = raw.LastIndexOf("```");
+                if (fence >= 0) raw = raw.Substring(0, fence);
+                raw = raw.Trim();
+            }
+
+            try
+            {
+                return JsonUtility.FromJson<DNDLLM.Map.LogicalGrid>(raw);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[LLMService] LogicalGrid parse failed: {e.Message}\nRaw: {raw}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Generates ONE cohesive isometric map image for the entire NxN grid (Strategy D, phase 2).
+        /// Mirrors the meta-prompt from DndMapGenerator/main.py:generate_holistic_map.
+        /// </summary>
+        public async Task<Texture2D> GenerateHolisticMapAsync(DNDLLM.Map.LogicalGrid grid, bool gridMode)
+        {
+            if (grid == null || grid.tiles == null || grid.tiles.Count == 0) return null;
+
+            int size = grid.size;
+            var sb = new StringBuilder(2048);
+            if (gridMode)
+            {
+                sb.Append($"Generate a single, seamless isometric fantasy DND battlemap image divided into a {size}x{size} grid of tiles. ");
+                sb.Append("The entire image must be rendered as ONE unified painting — each section blends naturally into its neighbors through continuous terrain, consistent lighting, and matching ground textures.\n\n");
+                sb.Append("CRITICAL RENDERING RULES:\n");
+                sb.Append($"- The output image MUST be perfectly square. Each of the {size}x{size} tiles must occupy an equal square portion of the canvas.\n");
+                sb.Append("- Use a consistent isometric 3/4 view angle across the ENTIRE image.\n");
+                sb.Append("- Consistent global lighting: single soft light source from the top-left.\n");
+                sb.Append("- Ground terrain must flow seamlessly across tile edges.\n");
+                sb.Append("- AVOID drawing visible grid lines, borders, or tile boundaries between sections.\n");
+                sb.Append("- Consistent art style and scale throughout.\n");
+                sb.Append("- Painterly hand-illustrated DND map aesthetic (Forgotten Realms style).\n\n");
+                sb.Append("GRID LAYOUT (column x, row y — origin top-left):\n");
+                foreach (var t in grid.tiles)
+                {
+                    string feat = string.IsNullOrEmpty(t.feature) ? "" : $" with a {t.feature}";
+                    sb.Append($"Tile({t.x},{t.y}): {t.terrain_type}{feat}. {t.description}\n");
+                }
+                sb.Append("\nThe final image should look like a single cohesive isometric map illustration that a DM would hand players at the table.");
+            }
+            else
+            {
+                sb.Append("Paint a single continuous isometric fantasy village illustration for a tabletop RPG. ");
+                sb.Append("The scene depicts a hilltop village viewed from a 3/4 bird's-eye angle. ");
+                sb.Append("This must be ONE seamless painting — imagine an artist painting the entire scene in a single session on one canvas, with terrain, paths, and grass flowing naturally throughout. No borders, no panels, no dividing lines of any kind.\n\n");
+                sb.Append("Layout by region:\n");
+                foreach (var t in grid.tiles)
+                {
+                    string col = t.x == 0 ? "left" : (t.x == size / 2 ? "center" : "right");
+                    string row = t.y == 0 ? "upper" : (t.y == size / 2 ? "middle" : "lower");
+                    string feat = string.IsNullOrEmpty(t.feature) ? "" : $" with a {t.feature}";
+                    sb.Append($"{row}-{col}: {t.terrain_type}{feat}. {t.description}\n");
+                }
+                sb.Append("\nArt direction: Hand-painted isometric view with warm afternoon lighting from the top-left casting soft shadows to the bottom-right. ");
+                sb.Append("Forgotten Realms / Pathfinder adventure map aesthetic. ");
+                sb.Append("All structures at the same consistent scale and perspective angle. ");
+                sb.Append("Dirt paths and grass connect naturally between areas. ");
+                sb.Append("Fill the ENTIRE square canvas edge-to-edge with terrain — extend to every border of the image. ");
+                sb.Append("No empty sky margins. One cohesive painting — NOT a collage of separate panels.");
+            }
+            return await GenerateImage(sb.ToString());
+        }
+
+        /// <summary>
+        /// Sends a rendered map image to a vision-capable LLM and asks for a short revision instruction
+        /// (or "PERFECT" if no fixes are needed). Returns the raw instruction text.
+        /// </summary>
+        public async Task<string> EvaluateMapImageAsync(Texture2D image, DNDLLM.Map.LogicalGrid grid)
+        {
+            if (image == null) return "";
+            byte[] png = image.EncodeToPNG();
+            string b64 = System.Convert.ToBase64String(png);
+
+            var expected = new StringBuilder();
+            int size = grid?.size ?? 0;
+            if (grid?.tiles != null)
+                foreach (var t in grid.tiles)
+                    if (!string.IsNullOrEmpty(t.feature))
+                        expected.Append($"  - At grid ({t.x},{t.y}): {t.feature} — {t.description}\n");
+
+            string promptText =
+                $"You are reviewing a {size}x{size} isometric DND battlemap painting.\n\n" +
+                $"Expected features:\n{expected}\n\n" +
+                "Check for:\n" +
+                "- Missing or unrecognizable features\n" +
+                "- Visible seams, black lines, or tile boundaries\n" +
+                "- Terrain that doesn't flow naturally\n" +
+                "- Inconsistent art style or lighting\n" +
+                "- Stairs leading nowhere, structures floating, paths dead-ending\n" +
+                "- Scale mismatches between people, buildings, objects\n\n" +
+                "Reply with ONLY a short instruction (2-3 sentences) describing what to fix. " +
+                "Do NOT explain what you see or list what is correct. " +
+                "If nothing needs fixing, reply with exactly: PERFECT";
+
+            // Hand-built JSON: text + image_url content array. Same shape as GenerateStyledTile.
+            string requestJson =
+                "{\"model\":\"" + EscapeJson(evalModel) + "\"," +
+                "\"messages\":[{\"role\":\"user\",\"content\":[" +
+                "{\"type\":\"text\",\"text\":\"" + EscapeJson(promptText) + "\"}," +
+                "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64," + b64 + "\"}}" +
+                "]}]}";
+
+            string url = "https://openrouter.ai/api/v1/chat/completions";
+            using (var request = new UnityEngine.Networking.UnityWebRequest(url, "POST"))
+            {
+                byte[] bodyRaw = Encoding.UTF8.GetBytes(requestJson);
+                request.uploadHandler   = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
+                request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type",  "application/json");
+                request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
+                request.SetRequestHeader("HTTP-Referer",  "https://github.com/google-deepmind/antigravity");
+                request.SetRequestHeader("X-Title",       "DNDLLM");
+
+                var op = request.SendWebRequest();
+                while (!op.isDone) await Task.Yield();
+
+                if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"[LLMService] Map eval error: {request.error} — {request.downloadHandler.text}");
+                    return "";
+                }
+
+                var responseData = JsonUtility.FromJson<OpenRouterResponse>(request.downloadHandler.text);
+                if (responseData?.choices?.Count > 0)
+                    return (responseData.choices[0].message.content ?? "").Trim();
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// Sends a rendered map image + a short revision instruction to the image model and gets back
+        /// a refined map image. Uses the Gemini multimodal path (image+text → image).
+        /// </summary>
+        public async Task<Texture2D> RefineMapImageAsync(Texture2D image, string feedback)
+        {
+            if (image == null || string.IsNullOrEmpty(feedback)) return image;
+
+            string instruction =
+                "This is an isometric DND battlemap painting. Apply the following improvements while " +
+                "keeping the overall composition, art style, and layout intact:\n\n" +
+                feedback + "\n\n" +
+                "Return the improved version of the full map as a single square image.";
+
+            // Reuse the GenerateStyledTile multimodal path: it already does text+image → image via Gemini.
+            // We pass the current map as the "style anchor" and the feedback as the prompt.
+            // GenerateStyledTile bypasses cache for non-google models, so force a Gemini-style call here:
+            if (!this.imageModel.ToLower().StartsWith("google/"))
+            {
+                Debug.LogWarning("[LLMService] RefineMapImageAsync requires a google/* imageModel for multimodal refinement; returning original image.");
+                return image;
+            }
+            return await GenerateStyledTile(instruction, image);
+        }
+
+        private static LLMChatResult ParseChatToolsResponse(string rawJson)
+        {
+            var result = new LLMChatResult();
+            try
+            {
+                var dto = JsonUtility.FromJson<ResponseWithToolsDto>(rawJson);
+                if (dto?.choices == null || dto.choices.Count == 0) return result;
+                var msg = dto.choices[0].message;
+                if (msg == null) return result;
+
+                if (msg.tool_calls != null && msg.tool_calls.Count > 0)
+                {
+                    foreach (var tc in msg.tool_calls)
+                    {
+                        if (tc?.function == null) continue;
+                        result.ToolCalls.Add(new LLMToolCall
+                        {
+                            Id = tc.id,
+                            Name = tc.function.name,
+                            ArgumentsJson = tc.function.arguments,
+                        });
+                    }
+                }
+                result.Text = msg.content;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[LLMService] Failed to parse tool-call response: {e.Message}\nRaw: {rawJson}");
+            }
+            return result;
         }
 
         private Texture2D ParseBase64Image(string content)

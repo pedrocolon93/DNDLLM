@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using DnD.Core;
 using DnD.Character;
 using DnD.AI;
@@ -35,6 +37,7 @@ namespace DnD.Managers
 
         [Header("UI — set by UISceneBuilder")]
         [SerializeField] private DnD.UI.TitleScreen             titleScreen;
+        [SerializeField] private DnD.UI.AdventurePromptPopup    adventurePromptPopup;
         [SerializeField] private DnD.UI.CharacterCreationPopup  characterPopup;
         [SerializeField] private UnityEngine.UI.Button          menuButton;
         [SerializeField] private DnD.UI.InGameMenuPanel         inGameMenuPanel;
@@ -48,6 +51,7 @@ namespace DnD.Managers
         private string _appearanceDescription = "";
         private string _backstory = "";
         private Texture2D _characterPortrait;
+        private Texture2D _characterMapToken; // top-down sprite shown on the map; persisted per save slot
         private List<DnD.Data.TileDescriptionEntry> _pendingTileDescriptions;
         private List<DnD.Data.TileGridEntry>        _pendingTileGrid;
         private readonly MapGraph _mapGraph = new MapGraph();
@@ -68,6 +72,16 @@ namespace DnD.Managers
             {
                 Destroy(gameObject);
                 return;
+            }
+
+            // UI buttons need an EventSystem to receive clicks. The scene was
+            // built procedurally without one, so create it here if missing.
+            if (FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+            {
+                var es = new GameObject("EventSystem");
+                es.AddComponent<UnityEngine.EventSystems.EventSystem>();
+                es.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+                DontDestroyOnLoad(es);
             }
         }
 
@@ -99,6 +113,17 @@ namespace DnD.Managers
                     inGameMenuPanel.OnSave            = OnSaveFromMenu;
                     inGameMenuPanel.OnLoad            = OnLoadFromMenu;
                     inGameMenuPanel.OnRegenerateTile  = OnRegenerateTileFromMenu;
+                    inGameMenuPanel.OnTTSEnabledChanged = v =>
+                    {
+                        if (DNDLLM.Services.TTSService.Instance != null)
+                            DNDLLM.Services.TTSService.Instance.Enabled = v;
+                    };
+                    inGameMenuPanel.OnTTSAutoPlayChanged = v =>
+                    {
+                        if (DNDLLM.Services.TTSService.Instance != null)
+                            DNDLLM.Services.TTSService.Instance.AutoPlay = v;
+                        SaveCurrentSlot();  // persist immediately
+                    };
                 }
 
                 if (editMapButton != null)
@@ -125,6 +150,57 @@ namespace DnD.Managers
             GUI.color = Color.yellow;
             GUI.Label(new Rect(10, 10, 600, 40), $"[GM] {_initStatus} | state={currentState} | ChatUI={(ChatUI.Instance != null ? "OK" : "NULL")}");
             GUI.color = Color.white;
+        }
+
+        private void Update()
+        {
+            if (!Input.GetKeyDown(KeyCode.Escape)) return;
+
+            // First Escape while an input field has focus = blur the field. Unity/TMP handle
+            // the deactivation themselves; we just bail out so the same press doesn't ALSO
+            // open the menu or close a panel. The next Escape (no field focused) goes through.
+            if (EventSystem.current != null)
+            {
+                var sel = EventSystem.current.currentSelectedGameObject;
+                if (sel != null && sel.GetComponent<TMP_InputField>() != null) return;
+            }
+
+            // Close the topmost open panel/popup. If nothing is open, the in-game menu
+            // acts as a pause toggle — same affordance as the MENU button.
+            if (TryClose(adventurePromptPopup)  ) return;
+            if (TryClose(characterScreenPanel)  ) return;
+            if (TryClose(editMapPanel)          ) return;
+            if (TryClose(inGameMenuPanel)       ) return;
+            if (characterPopup != null && characterPopup.gameObject.activeSelf)
+            {
+                // Mirror the popup's own Cancel button so the GameManager state machine
+                // gets the OnCancelled callback (returns to MainMenu).
+                characterPopup.gameObject.SetActive(false);
+                characterPopup.OnCancelled?.Invoke();
+                return;
+            }
+
+            OnMenuButtonPressed();
+        }
+
+        private static bool TryClose(MonoBehaviour panel)
+        {
+            if (panel == null || !panel.gameObject.activeSelf) return false;
+            switch (panel)
+            {
+                case DnD.UI.InGameMenuPanel m:        m.Close(); return true;
+                case DnD.UI.EditMapPanel e:           e.Close(); return true;
+                case DnD.UI.CharacterScreenPanel c:   c.Close(); return true;
+                // Adventure prompt's OnCancel handler in GameManager closes the popup AND
+                // calls ChangeState(MainMenu) (which re-shows the title screen). Skipping
+                // OnCancel — as a plain Close() would — leaves the user with a black screen
+                // because the title was already hidden when the popup opened.
+                case DnD.UI.AdventurePromptPopup a:
+                    if (a.OnCancel != null) a.OnCancel.Invoke();
+                    else                    a.Close();
+                    return true;
+                default:                              panel.gameObject.SetActive(false); return true;
+            }
         }
 
         private async Task InitializeSystemsAsync()
@@ -175,10 +251,23 @@ namespace DnD.Managers
 
             // Subscribe to non-UI events now
             if (dungeonMaster != null)
+            {
                 dungeonMaster.OnDMResponse += OnDMResponse;
+                dungeonMaster.OnToolDispatched += (toolName, _, result) =>
+                {
+                    if (ChatUI.Instance != null)
+                        ChatUI.Instance.AddSystemMessage($"› {toolName} → {result}");
+                };
+            }
 
             if (CombatManager.Instance != null)
+            {
                 CombatManager.Instance.OnCombatMessage += OnCombatMessage;
+                CombatManager.Instance.OnPlayerTurnStart += () => ChatUI.Instance?.SetInputEnabled(true);
+                CombatManager.Instance.OnPlayerTurnEnd   += () => ChatUI.Instance?.SetInputEnabled(false);
+                CombatManager.Instance.OnEnemyTurnStart  += () => ChatUI.Instance?.SetInputEnabled(false);
+                CombatManager.Instance.OnCombatEnded     += _  => ChatUI.Instance?.SetInputEnabled(true);
+            }
 
             Debug.Log("[GameManager] All systems initialized!");
         }
@@ -189,6 +278,7 @@ namespace DnD.Managers
             currentState = newState;
 
             // Hide popups that must not linger across state changes
+            if (adventurePromptPopup != null) adventurePromptPopup.Close();
             if (newState != GameState.CharacterCreation && characterPopup != null)
                 characterPopup.gameObject.SetActive(false);
             if (newState != GameState.MainMenu && titleScreen != null)
@@ -259,19 +349,44 @@ namespace DnD.Managers
             int slot = 0;
             for (int i = 0; i < 3; i++)
             {
-                var (data, _) = DNDLLM.Services.SaveSystem.Load(i);
+                var (data, _, _) = DNDLLM.Services.SaveSystem.Load(i);
                 if (data == null) { slot = i; break; }
             }
             _currentSlotIndex = slot;
 
             if (titleScreen != null) titleScreen.gameObject.SetActive(false);
-            if (ChatUI.Instance != null)
+
+            if (adventurePromptPopup != null)
             {
+                adventurePromptPopup.OnSubmit = OnAdventurePromptSubmitted;
+                adventurePromptPopup.OnCancel = OnAdventurePromptCancelled;
+                adventurePromptPopup.Open();
+            }
+            else if (ChatUI.Instance != null)
+            {
+                // Fallback if the popup isn't built yet — keep the old chat flow working.
+                Debug.LogWarning("[GameManager] adventurePromptPopup not assigned; falling back to chat prompt. Run DnD/Setup Scene (All Steps) to build it.");
                 ChatUI.Instance.ClearChat();
                 ChatUI.Instance.AddSystemMessage("=== NEW ADVENTURE ===");
                 ChatUI.Instance.AddSystemMessage("Describe the adventure you want to embark on...");
             }
-            // State stays MainMenu; player types prompt → StartCampaignAsync transitions to CharacterCreation
+        }
+
+        private async void OnAdventurePromptSubmitted(string prompt)
+        {
+            if (adventurePromptPopup != null) adventurePromptPopup.Close();
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.ClearChat();
+                ChatUI.Instance.AddSystemMessage("=== NEW ADVENTURE ===");
+            }
+            await StartCampaignAsync(prompt);
+        }
+
+        private void OnAdventurePromptCancelled()
+        {
+            if (adventurePromptPopup != null) adventurePromptPopup.Close();
+            ChangeState(GameState.MainMenu);
         }
 
         private void OnSlotSelected(int slotIndex)
@@ -366,6 +481,7 @@ namespace DnD.Managers
         private void OnCharacterCreationComplete(CharacterCreationData data)
         {
             _characterPortrait       = data.portrait;
+            _characterMapToken       = null; // new character → regenerate the map sprite
             _appearanceDescription   = data.appearanceDescription ?? "";
             _backstory               = data.backstory              ?? "";
 
@@ -428,7 +544,9 @@ namespace DnD.Managers
                 gameState             = currentState.ToString(),
                 messages              = ChatUI.Instance != null
                                             ? ChatUI.Instance.GetMessageHistory()
-                                            : new System.Collections.Generic.List<ChatMessageData>()
+                                            : new System.Collections.Generic.List<ChatMessageData>(),
+                audioAutoplay         = DNDLLM.Services.TTSService.Instance != null
+                                            && DNDLLM.Services.TTSService.Instance.AutoPlay,
             };
             saveData.slotLabel  = $"{saveData.characterName} · {saveData.className} · Lv{saveData.level}";
             saveData.backstory  = _backstory;
@@ -450,15 +568,14 @@ namespace DnD.Managers
                     });
             }
 
-            // Use the caller-supplied portrait, else the stored one (may be the generated map token)
             UnityEngine.Texture2D savePortrait = portrait ?? _characterPortrait;
-            DNDLLM.Services.SaveSystem.Save(_currentSlotIndex, saveData, savePortrait);
+            DNDLLM.Services.SaveSystem.Save(_currentSlotIndex, saveData, savePortrait, _characterMapToken);
             Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel}");
         }
 
         private void LoadSlot(int slotIndex)
         {
-            var (data, portrait) = DNDLLM.Services.SaveSystem.Load(slotIndex);
+            var (data, portrait, mapToken) = DNDLLM.Services.SaveSystem.Load(slotIndex);
             if (data == null)
             {
                 Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
@@ -475,12 +592,16 @@ namespace DnD.Managers
             _appearanceDescription   = data.appearanceDescription ?? "";
             _backstory               = data.backstory ?? "";
             _characterPortrait       = portrait;
+            _characterMapToken       = mapToken;
 
             // Queue tile descriptions and per-tile grid to be applied once the map finishes generating
             _pendingTileDescriptions = (data.tileDescriptions != null && data.tileDescriptions.Count > 0)
                 ? data.tileDescriptions : null;
             _pendingTileGrid = (data.tileGrid != null && data.tileGrid.Count > 0)
                 ? data.tileGrid : null;
+
+            if (DNDLLM.Services.TTSService.Instance != null)
+                DNDLLM.Services.TTSService.Instance.AutoPlay = data.audioAutoplay;
 
             if (playerCharacter == null)
             {
@@ -544,8 +665,8 @@ namespace DnD.Managers
             "You are an expert Dungeon Master for a D&D 5e adventure. " +
             "Write vivid, immersive descriptions in 2-4 sentences. " +
             "Always end your narrative with exactly 3 suggested actions for the player, " +
-            "each on its own line prefixed with '► '. Keep suggestions short (5-8 words each).\n\n" +
-            "You have access to game tools. After the ► suggestions you MAY append a " +
+            "each on its own line prefixed with '› '. Keep suggestions short (5-8 words each).\n\n" +
+            "You have access to game tools. After the › suggestions you MAY append a " +
             "[GM_ACTIONS] block to drive game state. Only include actions the narrative warrants. " +
             "Omit the block entirely if nothing should happen mechanically.\n\n" +
             "Available tools (one command per line inside the block):\n" +
@@ -561,9 +682,9 @@ namespace DnD.Managers
             "  UNLOCK_DOOR <x> <y>            (opens a previously locked passage)\n" +
             "  ENTER_SUBREGION <description>  (transport player into a named sub-area, e.g. 'dark armory' or 'flooded cellar')\n\n" +
             "Example response ending:\n" +
-            "► Search the body\n" +
-            "► Retreat north\n" +
-            "► Call for help\n" +
+            "› Search the body\n" +
+            "› Retreat north\n" +
+            "› Call for help\n" +
             "[GM_ACTIONS]\n" +
             "DAMAGE player 4\n" +
             "AWARD_XP 25\n" +
@@ -580,15 +701,18 @@ namespace DnD.Managers
             string rootTheme = _campaignSeed.Length > 0 ? _campaignSeed.Split(',')[0].Trim() : "dungeon";
             _mapGraph.InitRoot(rootTheme);
 
-            if (MapGenerator.Instance != null)
+            if (MapGenerator.Instance == null)
             {
-                MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
-                MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
-                // Skip LLM description generation when we have saved descriptions to restore
-                MapGenerator.Instance.SkipDescriptionGeneration = _pendingTileDescriptions != null;
-                MapGenerator.Instance.GenerateMap(
-                    _campaignSeed.Length > 0 ? _campaignSeed : "dungeon");
+                Debug.LogError("[GameManager] MapGenerator.Instance is null — run DnD/Setup Game Manager to attach it to GameSystem.");
+                return;
             }
+
+            MapGenerator.Instance.OnMapReady -= OnMapReadyNarrate;
+            MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
+            // Skip LLM description generation when we have saved descriptions to restore
+            MapGenerator.Instance.SkipDescriptionGeneration = _pendingTileDescriptions != null;
+            MapGenerator.Instance.GenerateMap(
+                _campaignSeed.Length > 0 ? _campaignSeed : "dungeon");
         }
 
         private async void OnMapReadyNarrate()
@@ -673,10 +797,14 @@ namespace DnD.Managers
         {
             if (MapGenerator.Instance == null) return;
 
-            Texture2D charTex = null;
+            Texture2D charTex = _characterMapToken; // reuse persisted token if we have one
+            using var _busy = charTex == null
+                ? DNDLLM.Services.BusyIndicator.Show("Generating character sprite…")
+                : null;
 
             // Generate a top-down character token styled to match the map's tiles
-            if (LLMService.Instance != null && MapGenerator.Instance.StyleAnchor != null
+            if (charTex == null
+                && LLMService.Instance != null && MapGenerator.Instance.StyleAnchor != null
                 && MapGenerator.Instance.StyleAnchor != Texture2D.whiteTexture)
             {
                 string race       = playerCharacter != null ? playerCharacter.race.ToString() : "Human";
@@ -703,25 +831,24 @@ namespace DnD.Managers
                 Debug.Log($"[GameManager] Character tile generated: {(charTex != null ? "OK" : "failed")}");
             }
 
-            // Fall back to the character portrait if generation failed
+            // Fall back to the character portrait if token generation failed.
+            // NOTE: don't write the map token into _characterPortrait — the portrait is the
+            // canonical character image. Cache the generated token in _characterMapToken so the
+            // next save persists it and subsequent maps reuse it without another LLM round-trip.
             if (charTex == null) charTex = _characterPortrait;
-
-            // Update _characterPortrait so the next save persists the generated token
-            if (charTex != null) _characterPortrait = charTex;
+            if (charTex != null && _characterMapToken == null) _characterMapToken = charTex;
 
             // Starting cell: just inside the south entrance (bottom door)
             int startX = MapGenerator.Instance.width  / 2;
             int startY = 1; // row above the bottom wall
 
-            // Create the controller if it doesn't exist yet
             if (MapCharacterController.Instance == null)
             {
-                var go = new GameObject("MapCharacter");
-                go.AddComponent<SpriteRenderer>();         // must be added BEFORE MapCharacterController
-                go.AddComponent<MapCharacterController>();
+                Debug.LogError("[GameManager] MapCharacterController.Instance is null — run DnD/Setup Game Manager to attach it.");
+                return;
             }
 
-            MapCharacterController.Instance?.Initialize(charTex, startX, startY);
+            MapCharacterController.Instance.Initialize(charTex, startX, startY);
         }
 
         // ── Sub-map traversal (MapGraph-backed) ──────────────────────────────
@@ -761,14 +888,14 @@ namespace DnD.Managers
                 parentCtx);
         }
 
-        private async Task EnterSubregionViaKey(string graphKey, string childTheme,
-                                                 int returnX, int returnY,
-                                                 string announceMsg,
-                                                 string parentContext = "")
+        private Task EnterSubregionViaKey(string graphKey, string childTheme,
+                                           int returnX, int returnY,
+                                           string announceMsg,
+                                           string parentContext = "")
         {
             var gen = MapGenerator.Instance;
             var cc  = MapCharacterController.Instance;
-            if (gen == null) return;
+            if (gen == null) return Task.CompletedTask;
 
             // Snapshot the current map into the graph node before leaving
             var currentSnap = gen.TakeSnapshot(cc?.GridX ?? returnX, cc?.GridY ?? returnY);
@@ -798,7 +925,7 @@ namespace DnD.Managers
                 int cx = gen.width / 2, cy = gen.height / 2;
                 cc?.MoveTo(cx, cy);
                 ChatUI.Instance?.AddSystemMessage("You recognise this place from before.");
-                return;
+                return Task.CompletedTask;
             }
 
             // ── New room: give LLM context about the parent area, then generate ──
@@ -810,6 +937,7 @@ namespace DnD.Managers
             gen.OnMapReady += OnSubMapReady;
             gen.SkipDescriptionGeneration = false;
             gen.GenerateMap(childTheme);
+            return Task.CompletedTask;
         }
 
         private async void OnSubMapReady()
@@ -1051,14 +1179,18 @@ namespace DnD.Managers
 
         private async Task HandleExplorationInput(string input)
         {
-            // ── Movement ─────────────────────────────────────────────────
+            // ── Fast-path: explicit direction keywords move immediately. ─────
+            string movementNote = "";
             if (TryParseMovement(input, out int dx, out int dy))
             {
                 bool moved = MapCharacterController.Instance?.TryMove(dx, dy) ?? false;
                 if (!moved && ChatUI.Instance != null)
                     ChatUI.Instance.AddSystemMessage("Something blocks your path.");
+                movementNote = moved
+                    ? "(Player has just moved one tile via direction keyword — do NOT call MOVE again.)"
+                    : "(Player tried to move but was blocked.)";
 
-                // Check if the player stepped onto a Door or Exit tile
+                // Door / exit transitions: handle and stop
                 if (moved)
                 {
                     var cc  = MapCharacterController.Instance;
@@ -1066,55 +1198,32 @@ namespace DnD.Managers
                     if (cc != null && gen?.grid != null)
                     {
                         var tileType = gen.grid[cc.GridX, cc.GridY].type;
-                        if (tileType == TileType.Door)
-                        {
-                            await TryEnterRoom();
-                            return; // new map generates; stop processing this input
-                        }
-                        else if (tileType == TileType.Exit)
-                        {
-                            TryExitRoom();
-                            return;
-                        }
+                        if (tileType == TileType.Door)  { await TryEnterRoom(); return; }
+                        else if (tileType == TileType.Exit) { TryExitRoom(); return; }
                     }
                 }
             }
 
-            // ── DM narration ──────────────────────────────────────────────
-            IGameCommand command = await commandParser.ParseCommandAsync(input, playerCharacter);
+            if (dungeonMaster == null) return;
 
-            if (LLMService.Instance != null && ChatUI.Instance != null)
-            {
-                string pos = MapCharacterController.Instance != null
-                    ? $" (at grid {MapCharacterController.Instance.GridX},{MapCharacterController.Instance.GridY})"
-                    : "";
-                string tileCtx = "";
-                if (MapGenerator.Instance != null && MapCharacterController.Instance != null)
-                    tileCtx = "\n\nEnvironment:\n" + MapGenerator.Instance.GetTileContext(
-                        MapCharacterController.Instance.GridX,
-                        MapCharacterController.Instance.GridY);
-                string userPrompt =
-                    $"Campaign: {_campaignSeed}\nPlayer{pos} does: {input}{tileCtx}\n" +
-                    "Describe what happens, then suggest 3 possible next actions.";
+            // ── DM tool loop: one tool per LLM round-trip until final narration. ─
+            string envContext = BuildExplorationContext(movementNote);
+            string narration  = await dungeonMaster.RunPlayerTurnAsync(input, envContext, playerCharacter);
+            if (!string.IsNullOrEmpty(narration) && ChatUI.Instance != null)
+                ChatUI.Instance.AddDMMessage(narration, useTypewriter: true);
+        }
 
-                string rawResponse = await LLMService.Instance.SendPrompt(DM_SYSTEM_PROMPT, userPrompt);
-                if (!string.IsNullOrEmpty(rawResponse))
-                {
-                    string narrative = GMToolExecutor.ExtractNarrative(rawResponse);
-                    if (!string.IsNullOrEmpty(narrative))
-                        ChatUI.Instance.AddDMMessage(narrative, useTypewriter: true);
-
-                    var actionResults = GMToolExecutor.ExecuteActions(rawResponse, playerCharacter);
-                    foreach (string r in actionResults)
-                        ChatUI.Instance.AddSystemMessage(r);
-                }
-            }
-
-            if (command != null && command.CanExecute())
-                command.Execute();
-
-            if (input.ToLower().Contains("attack") || input.ToLower().Contains("fight"))
-                await StartRandomEncounter();
+        private string BuildExplorationContext(string movementNote)
+        {
+            string pos = MapCharacterController.Instance != null
+                ? $"Player at grid ({MapCharacterController.Instance.GridX},{MapCharacterController.Instance.GridY})."
+                : "";
+            string tileCtx = "";
+            if (MapGenerator.Instance != null && MapCharacterController.Instance != null)
+                tileCtx = "Environment:\n" + MapGenerator.Instance.GetTileContext(
+                    MapCharacterController.Instance.GridX,
+                    MapCharacterController.Instance.GridY);
+            return $"Campaign: {_campaignSeed}\n{pos} {movementNote}\n{tileCtx}".Trim();
         }
 
         /// <summary>
@@ -1152,15 +1261,14 @@ namespace DnD.Managers
 
         private async Task HandleCombatInput(string input)
         {
-            if (CombatManager.Instance != null && CombatManager.Instance.IsPlayerTurn())
-            {
-                IGameCommand command = await commandParser.ParseCommandAsync(input, playerCharacter);
+            if (CombatManager.Instance == null || !CombatManager.Instance.IsPlayerTurn()) return;
 
-                if (command != null && command.CanExecute())
-                {
-                    command.Execute();
-                }
-            }
+            IGameCommand command = await commandParser.ParseCommandAsync(input, playerCharacter);
+            if (command != null && command.CanExecute())
+                command.Execute();
+
+            // Wake the combat coroutine so the next turn can begin.
+            CombatManager.Instance.NotifyPlayerActed();
         }
 
         private async Task HandleDialogueInput(string input)

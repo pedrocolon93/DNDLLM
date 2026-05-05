@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+out/
+*.pyc
+smoke_tile.png

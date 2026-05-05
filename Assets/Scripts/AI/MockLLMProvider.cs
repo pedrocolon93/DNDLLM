@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -81,5 +82,63 @@ namespace DnD.AI
         {
             Debug.Log("[MockLLM] History cleared");
         }
+
+        public async Task<LLMChatResult> ChatWithToolsAsync(
+            IList<LLMChatMessage> messages,
+            IList<LLMTool> tools,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(150, cancellationToken);
+
+            // Find the last user message to seed deterministic behaviour
+            string lastUser = "";
+            for (int i = messages.Count - 1; i >= 0; i--)
+                if (messages[i].Role == "user") { lastUser = messages[i].Content ?? ""; break; }
+            string lower = lastUser.ToLowerInvariant();
+
+            // Count prior assistant tool-call rounds in the message list to know which step we're on
+            int priorToolRounds = 0;
+            foreach (var m in messages)
+                if (m.Role == "assistant" && m.ToolCalls != null && m.ToolCalls.Count > 0) priorToolRounds++;
+
+            // Deterministic mock script
+            if (lower.Contains("attack") || lower.Contains("fight") || lower.Contains("kill"))
+            {
+                if (priorToolRounds == 0)
+                    return ToolResult("call_mock_1", "SPAWN_ENEMY", "{\"name\":\"Goblin\",\"hp\":10,\"ac\":12}");
+                if (priorToolRounds == 1)
+                    return ToolResult("call_mock_2", "DAMAGE", "{\"target\":\"player\",\"amount\":2}");
+                return TextResult("The Goblin lunges, you parry, and end the exchange breathing hard.");
+            }
+
+            if (lower.Contains("move") || lower.Contains("go ") || lower.Contains("walk") || lower.Contains("north") || lower.Contains("south") || lower.Contains("east") || lower.Contains("west"))
+            {
+                if (priorToolRounds == 0)
+                {
+                    string dir = "north";
+                    if (lower.Contains("south")) dir = "south";
+                    else if (lower.Contains("east")) dir = "east";
+                    else if (lower.Contains("west")) dir = "west";
+                    return ToolResult("call_mock_m", "MOVE", $"{{\"target\":\"player\",\"direction\":\"{dir}\"}}");
+                }
+                return TextResult("You stride forward, eyes scanning the path ahead.");
+            }
+
+            if (lower.Contains("heal") || lower.Contains("rest") || lower.Contains("bandage"))
+            {
+                if (priorToolRounds == 0)
+                    return ToolResult("call_mock_h", "HEAL", "{\"target\":\"player\",\"amount\":5}");
+                return TextResult("You catch your breath and tend to your wounds.");
+            }
+
+            // No matching keyword → pure narration, no tool calls
+            return TextResult("The Dungeon Master watches you, awaiting your move.");
+        }
+
+        private static LLMChatResult ToolResult(string id, string name, string argsJson) =>
+            new LLMChatResult { ToolCalls = new List<LLMToolCall> { new LLMToolCall { Id = id, Name = name, ArgumentsJson = argsJson } } };
+
+        private static LLMChatResult TextResult(string text) =>
+            new LLMChatResult { Text = text };
     }
 }

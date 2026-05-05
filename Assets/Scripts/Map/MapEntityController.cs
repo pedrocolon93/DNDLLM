@@ -44,7 +44,7 @@ namespace DNDLLM.Map
             if (tex != null)
             {
                 float cs  = MapGenerator.Instance != null ? MapGenerator.Instance.cellSize : 1f;
-                float ppu = tex.width / (cs * 0.6f);
+                float ppu = tex.width / (cs * 0.45f);
                 _sr.sprite = Sprite.Create(
                     tex,
                     new Rect(0, 0, tex.width, tex.height),

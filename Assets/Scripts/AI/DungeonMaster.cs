@@ -37,6 +37,33 @@ Your role:
 - Generate appropriate challenges based on party level
 - Keep responses concise but descriptive (2-4 sentences)
 
+MAP VISION:
+- When a battlemap image is attached to the user message, treat it as your view of the scene.
+  The image is the painted overhead map for the player's current area, with the same grid
+  coordinates the textual ""Environment"" block describes. Use it to ground your narration
+  in what is actually depicted (terrain, structures, features, sightlines, distances).
+- Never claim something appears on the map that isn't visible in the image.
+
+TOOL USE — IMPORTANT:
+- When the player's action requires a change to game state (movement, damage, healing, conditions,
+  spawning enemies, awarding XP, etc.), call the appropriate tool.
+- Call ONE tool per response. Wait for its result, then decide the next step.
+- After all needed tool calls have been made and resolved, send a final message containing only
+  the in-character narration of what happened — and NO tool call.
+- If the player's input is purely descriptive or conversational and changes nothing, skip tool
+  calls entirely and respond with narration directly.
+
+INTERACTIVE OPTIONS — IMPORTANT:
+- Whenever the moment naturally invites a choice (exploration crossroads, NPC interaction,
+  reactions to a threat), end your final narration with 2-4 suggested actions.
+- Format each option on its own line, prefixed with ""> "" (greater-than + space). Example:
+    > Investigate the ruins
+    > Talk to the hooded stranger
+    > Climb the ridge for a better view
+- Each option must be a short imperative phrase (2-8 words), written as if the player were
+  typing it. Do not number them. Do not put narration text after the option block.
+- Skip the option block during fast-moving combat exchanges or when the next action is obvious.
+
 When describing combat outcomes, reference dice rolls and mechanics.
 When players explore, describe what they see, hear, and sense.
 When players interact with NPCs, roleplay the characters authentically.
@@ -79,6 +106,8 @@ Always maintain the tone and setting established in the campaign.";
                 Debug.LogError("DungeonMaster not initialized!");
                 return null;
             }
+
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("Building campaign…");
 
             string timelinePrompt = $@"Create a D&D campaign timeline based on this premise:
 '{campaignPrompt}'
@@ -127,6 +156,8 @@ Format each section clearly. Keep it concise but exciting.";
             {
                 return "The Dungeon Master is currently unavailable.";
             }
+
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("DM narrating…");
 
             string contextInfo = string.IsNullOrEmpty(context) ? "" : $"\nContext: {context}";
             string historyContext = GetRecentHistory();
@@ -281,6 +312,124 @@ DESC: [description]";
         {
             conversationHistory.Clear();
             llmProvider?.ClearHistory();
+        }
+
+        public event Action<string, string, string> OnToolDispatched; // toolName, argsJson, resultText
+
+        /// <summary>
+        /// Iterative tool-call loop. The LLM emits one tool per round; each result is fed back
+        /// until it returns a final narration (or the step cap is hit). Returns the final narration.
+        /// </summary>
+        public async Task<string> RunPlayerTurnAsync(
+            string playerInput,
+            string envContext,
+            DnD.Character.CharacterStats player,
+            int maxToolSteps = 8)
+        {
+            if (!isInitialized || llmProvider == null)
+                return "The Dungeon Master is currently unavailable.";
+
+            using var _busy = DNDLLM.Services.BusyIndicator.Show("DM is thinking…");
+
+            // Use LLMService directly (it implements the tool-call API). The ILLMProvider may also
+            // implement it (mock does), but production traffic goes through LLMService.Instance.
+            var svc = DNDLLM.Services.LLMService.Instance;
+            if (svc == null)
+            {
+                Debug.LogWarning("[DungeonMaster] LLMService instance missing; falling back to text narration.");
+                return await NarrateActionAsync(playerInput, envContext);
+            }
+
+            var tools = GMToolExecutor.GetToolDefinitions();
+            var msgs = new List<LLMChatMessage>();
+            msgs.Add(LLMChatMessage.System(DM_SYSTEM_PROMPT));
+
+            string history = GetRecentHistory();
+            if (!string.IsNullOrEmpty(history))
+                msgs.Add(LLMChatMessage.System(history));
+
+            string userBlock = string.IsNullOrEmpty(envContext)
+                ? $"Player: {playerInput}"
+                : $"Context: {envContext}\n\nPlayer: {playerInput}";
+
+            // Attach the painted battlemap to the player turn so multimodal models (Qwen, Gemini,
+            // GPT-4o, …) can see what the player is looking at. StyleAnchor holds the final
+            // grid-overlaid map texture; on text-only models the image is ignored harmlessly.
+            string mapDataUrl = TryEncodeMapDataUrl();
+            msgs.Add(string.IsNullOrEmpty(mapDataUrl)
+                ? LLMChatMessage.User(userBlock)
+                : LLMChatMessage.UserWithImage(userBlock, mapDataUrl));
+
+            string finalNarration = "";
+            int steps = 0;
+
+            try
+            {
+                while (steps < maxToolSteps)
+                {
+                    var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+                    LLMChatResult result = await svc.ChatWithToolsAsync(msgs, tools, cts.Token);
+
+                    if (result.HasToolCalls)
+                    {
+                        msgs.Add(LLMChatMessage.AssistantToolCalls(result.ToolCalls));
+                        foreach (var call in result.ToolCalls)
+                        {
+                            string r = GMToolExecutor.DispatchToolCall(call.Name, call.ArgumentsJson, player);
+                            msgs.Add(LLMChatMessage.Tool(call.Id, call.Name, r));
+                            OnToolDispatched?.Invoke(call.Name, call.ArgumentsJson, r);
+                            steps++;
+                        }
+                        continue;
+                    }
+
+                    finalNarration = result.Text ?? "";
+                    break;
+                }
+
+                if (steps >= maxToolSteps && string.IsNullOrEmpty(finalNarration))
+                    finalNarration = $"(DM stopped after {steps} tool calls.)";
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[DungeonMaster] Tool loop failed: {e.Message}");
+                finalNarration = "The Dungeon Master loses their train of thought...";
+            }
+
+            AddToHistory($"Player: {playerInput}");
+            if (!string.IsNullOrEmpty(finalNarration)) AddToHistory($"DM: {finalNarration}");
+            OnDMResponse?.Invoke(finalNarration);
+            return finalNarration;
+        }
+
+        // Cached PNG-base64 encoding of the battlemap. Keyed by texture reference so that a
+        // new map (different StyleAnchor instance) automatically invalidates the cache, and
+        // so repeated player turns on the same map skip ~100–300 ms of PNG+base64 work.
+        private static Texture2D _cachedMapTex;
+        private static string    _cachedMapDataUrl;
+
+        /// <summary>Returns a data:image/png;base64,... URL for the current battlemap, or "" if none/unreadable.</summary>
+        private static string TryEncodeMapDataUrl()
+        {
+            var gen = DNDLLM.Map.MapGenerator.Instance;
+            var tex = gen != null ? gen.StyleAnchor : null;
+            if (tex == null) return "";
+            if (ReferenceEquals(tex, _cachedMapTex)) return _cachedMapDataUrl ?? "";
+
+            try
+            {
+                byte[] png = tex.EncodeToPNG();
+                if (png == null || png.Length == 0) return "";
+                string url = "data:image/png;base64," + System.Convert.ToBase64String(png);
+                _cachedMapTex     = tex;
+                _cachedMapDataUrl = url;
+                return url;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[DungeonMaster] Map encode failed: {e.Message}");
+                return "";
+            }
         }
     }
 
