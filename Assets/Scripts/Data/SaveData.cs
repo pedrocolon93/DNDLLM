@@ -85,6 +85,7 @@ namespace DnD.Data
         public int    x, y;
         public int    hp, maxHp, ac;
         public bool   isEnemy;
+        public bool   isHidden; // when true the sprite is suppressed until REVEAL_ENTITY flips it
     }
 
     // Passed from CharacterCreationPopup to GameManager on completion

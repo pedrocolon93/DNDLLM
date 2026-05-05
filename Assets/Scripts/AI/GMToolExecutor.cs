@@ -155,6 +155,27 @@ namespace DnD.AI
                     }
                     break;
 
+                case "REVEAL_ENTITY":
+                    // REVEAL_ENTITY <name>  — flips a hidden entity's sprite back on
+                    if (p.Length >= 2)
+                    {
+                        string revealName = p[1];
+                        bool revealed = false;
+                        foreach (var e in MapEntityController.All)
+                        {
+                            if (e == null || !e.IsHidden) continue;
+                            if (e.EntityName.ToLower().Contains(revealName.ToLower()))
+                            {
+                                e.IsHidden = false;
+                                out_.Add($"The {e.EntityName} steps into view!");
+                                revealed = true;
+                                break;
+                            }
+                        }
+                        if (!revealed) out_.Add($"Nothing hidden matches '{revealName}'.");
+                    }
+                    break;
+
                 case "LOCK_DOOR":
                     // LOCK_DOOR <x> <y>
                     if (p.Length >= 3 && int.TryParse(p[1], out int ldx) && int.TryParse(p[2], out int ldy))
@@ -242,6 +263,10 @@ namespace DnD.AI
 
                 new LLMTool("KILL_ENTITY",
                     "Remove a named entity from the map.",
+                    "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}"),
+
+                new LLMTool("REVEAL_ENTITY",
+                    "Reveal a previously hidden entity (the sprite was suppressed at spawn). Use when the player discovers an ambush, sees through a disguise, or otherwise notices something concealed.",
                     "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}"),
 
                 new LLMTool("LOCK_DOOR",
@@ -345,6 +370,22 @@ namespace DnD.AI
                             }
                         }
                         return $"No entity matching '{a.name}' found.";
+                    }
+
+                    case "REVEAL_ENTITY":
+                    {
+                        var a = JsonUtility.FromJson<NameArgs>(argsJson) ?? new NameArgs();
+                        string target = (a.name ?? "").ToLower();
+                        foreach (var e in MapEntityController.All)
+                        {
+                            if (e == null || !e.IsHidden) continue;
+                            if (e.EntityName.ToLower().Contains(target))
+                            {
+                                e.IsHidden = false;
+                                return $"{e.EntityName} revealed (sprite now visible).";
+                            }
+                        }
+                        return $"No hidden entity matching '{a.name}' found.";
                     }
 
                     case "LOCK_DOOR":
