@@ -156,7 +156,7 @@ namespace DnD.UI
             var bg = msgGO.AddComponent<Image>();
 
             var vlg = msgGO.AddComponent<VerticalLayoutGroup>();
-            vlg.padding = new RectOffset(10, 10, 6, 6);
+            vlg.padding = new RectOffset(8, 8, 3, 3);
             vlg.childForceExpandWidth  = true;
             vlg.childForceExpandHeight = false;
             vlg.childControlWidth  = true;
@@ -219,7 +219,7 @@ namespace DnD.UI
             bg.color = UITheme.BackgroundDM;
 
             var vlg = msgGO.AddComponent<VerticalLayoutGroup>();
-            vlg.padding = new RectOffset(10, 10, 6, 6);
+            vlg.padding = new RectOffset(8, 8, 3, 3);
             vlg.childForceExpandWidth  = true;
             vlg.childForceExpandHeight = false;
             vlg.childControlWidth  = true;
@@ -433,7 +433,7 @@ namespace DnD.UI
         {
             var go = new GameObject("OptionBtn", typeof(RectTransform));
             go.transform.SetParent(parent, false);
-            go.AddComponent<LayoutElement>().preferredHeight = 30;
+            go.AddComponent<LayoutElement>().preferredHeight = 26;
 
             var img = go.AddComponent<Image>();
             img.color = new Color(0.18f, 0.13f, 0.07f, 1f);
@@ -452,7 +452,7 @@ namespace DnD.UI
 
             var tmp = textGO.AddComponent<TextMeshProUGUI>();
             tmp.text      = "› " + label;
-            tmp.fontSize  = 12f;
+            tmp.fontSize  = 11f;
             tmp.color     = UITheme.GoldAccent;
             tmp.fontStyle = FontStyles.Normal;
             tmp.alignment = TextAlignmentOptions.MidlineLeft;
