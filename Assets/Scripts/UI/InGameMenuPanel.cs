@@ -17,6 +17,8 @@ namespace DnD.UI
         public System.Action OnSave;
         public System.Action OnLoad;
         public System.Action<int, int> OnRegenerateTile;
+        public System.Action<bool> OnTTSEnabledChanged;
+        public System.Action<bool> OnTTSAutoPlayChanged;
 
         // Set by UISceneBuilder
         [SerializeField] private GameObject tileListContainer;
@@ -33,6 +35,7 @@ namespace DnD.UI
         {
             gameObject.SetActive(true);
             RebuildTileList(playerX, playerY);
+            RebuildTTSRows();
         }
 
         public void Close() => gameObject.SetActive(false);
@@ -73,7 +76,7 @@ namespace DnD.UI
             hlg.spacing                = 6;
             hlg.childForceExpandWidth  = false;
             hlg.childForceExpandHeight = true;
-            hlg.childControlWidth      = false;
+            hlg.childControlWidth      = true;   // honour each child's LayoutElement.preferredWidth
             hlg.childControlHeight     = true;
             var le = row.AddComponent<LayoutElement>();
             le.preferredHeight = 26;
@@ -116,6 +119,67 @@ namespace DnD.UI
             btn.onClick.AddListener(() => OnRegenerateTile?.Invoke(cx, cy));
 
             return row;
+        }
+
+        private GameObject _ttsEnabledRow, _ttsAutoPlayRow;
+
+        private GameObject BuildToggleRow(Transform parent, string label, bool initialValue, System.Action<bool> onChanged)
+        {
+            var row = new GameObject($"ToggleRow_{label}", typeof(RectTransform));
+            row.transform.SetParent(parent, false);
+            var hlg = row.AddComponent<HorizontalLayoutGroup>();
+            hlg.padding = new RectOffset(4, 4, 2, 2);
+            hlg.spacing = 6;
+            hlg.childForceExpandWidth = false;
+            hlg.childForceExpandHeight = true;
+            hlg.childControlWidth = true;
+            hlg.childControlHeight = true;
+            var le = row.AddComponent<LayoutElement>();
+            le.preferredHeight = 26;
+            le.flexibleWidth = 1;
+
+            var labelGO = new GameObject("Label", typeof(RectTransform));
+            labelGO.transform.SetParent(row.transform, false);
+            labelGO.AddComponent<LayoutElement>().preferredWidth = 220;
+            var tmp = labelGO.AddComponent<TextMeshProUGUI>();
+            tmp.text = label; tmp.fontSize = 10f; tmp.color = UITheme.SystemText;
+            tmp.alignment = TextAlignmentOptions.MidlineLeft;
+
+            var tgGO = new GameObject("Toggle", typeof(RectTransform));
+            tgGO.transform.SetParent(row.transform, false);
+            tgGO.AddComponent<LayoutElement>().preferredWidth = 40;
+            var bg = tgGO.AddComponent<Image>();
+            bg.color = initialValue ? UITheme.GoldAccent : new Color(0.2f, 0.15f, 0.1f);
+            var btn = tgGO.AddComponent<Button>();
+            btn.targetGraphic = bg;
+            btn.onClick.AddListener(() =>
+            {
+                bool newVal = !(bg.color == (Color)UITheme.GoldAccent);
+                bg.color = newVal ? UITheme.GoldAccent : new Color(0.2f, 0.15f, 0.1f);
+                onChanged?.Invoke(newVal);
+            });
+
+            return row;
+        }
+
+        public void RebuildTTSRows()
+        {
+            if (_ttsEnabledRow  != null) Destroy(_ttsEnabledRow);
+            if (_ttsAutoPlayRow != null) Destroy(_ttsAutoPlayRow);
+            if (tileListContainer == null) return;
+
+            var tts = DNDLLM.Services.TTSService.Instance;
+            bool enabledInit  = tts != null && tts.Enabled;
+            bool autoPlayInit = tts != null && tts.AutoPlay;
+
+            _ttsEnabledRow  = BuildToggleRow(tileListContainer.transform, "DM voice",           enabledInit,  v => {
+                if (tts != null) tts.Enabled = v;
+                OnTTSEnabledChanged?.Invoke(v);
+            });
+            _ttsAutoPlayRow = BuildToggleRow(tileListContainer.transform, "Auto-play DM voice", autoPlayInit, v => {
+                if (tts != null) tts.AutoPlay = v;
+                OnTTSAutoPlayChanged?.Invoke(v);
+            });
         }
     }
 }
