@@ -50,8 +50,38 @@ namespace DnD.Data
         // Enemies / NPCs spawned on the current map (sprite textures persisted alongside as PNGs)
         public List<EntityEntry> entities = new List<EntityEntry>();
 
+        // Multi-player party. When this is empty (legacy single-player save), SaveSystem
+        // synthesises a single PlayerSaveEntry from the flat character fields above on
+        // load. New saves populate both forms — `players[0]` is the source of truth and
+        // the flat fields are written for backwards compatibility with older builds.
+        public List<PlayerSaveEntry> players = new List<PlayerSaveEntry>();
+        public int currentPlayerIndex = 0;
+
         // TTS preference (per-slot)
         public bool audioAutoplay = false;
+    }
+
+    /// <summary>One party member persisted in a save slot. Sprite textures are saved
+    /// alongside as slot_{i}_player_{j}_portrait.png and slot_{i}_player_{j}_token.png.</summary>
+    [Serializable]
+    public class PlayerSaveEntry
+    {
+        public string characterName;
+        public string raceName;       // Race.ToString()
+        public string className;      // CharacterClassName.ToString()
+        public string appearanceDescription;
+        public string backstory;
+
+        public int level;
+        public int maxHP;
+        public int currentHP;
+        public int armorClass;
+        public int str, dex, con, intel, wis, cha;
+
+        // Per-player position on the active map. Default (0,0) means "use the default
+        // start cell" — same fallback as the legacy top-level playerX/playerY fields.
+        public int gridX;
+        public int gridY;
     }
 
     [Serializable]

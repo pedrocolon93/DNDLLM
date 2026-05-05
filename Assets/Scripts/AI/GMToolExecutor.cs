@@ -35,6 +35,42 @@ namespace DnD.AI
             BlockRegex.Replace(fullResponse ?? "", "").Trim();
 
         /// <summary>
+        /// Resolves a tool target string to a specific party member.
+        ///
+        /// Accepts (case-insensitive):
+        ///   "player"     → the current turn owner (passed in as <paramref name="defaultPlayer"/>)
+        ///   "player_N"   → 1-based index into the party
+        ///   "&lt;name&gt;" → first party member whose characterName contains the string
+        ///
+        /// Returns null when no match is found AND no default is provided.
+        /// </summary>
+        public static CharacterStats ResolveTarget(string target, CharacterStats defaultPlayer)
+        {
+            if (string.IsNullOrEmpty(target)) return defaultPlayer;
+            string t = target.Trim().ToLowerInvariant();
+            if (t == "player") return defaultPlayer;
+
+            var party = Managers.GameManager.Instance?.Party;
+            if (party == null || party.Count == 0) return defaultPlayer;
+
+            // player_N (1-based)
+            if (t.StartsWith("player_") && int.TryParse(t.Substring(7), out int idx))
+            {
+                int zeroIdx = idx - 1;
+                if (zeroIdx >= 0 && zeroIdx < party.Count) return party[zeroIdx];
+                return defaultPlayer;
+            }
+
+            // Name match
+            foreach (var p in party)
+                if (p != null && !string.IsNullOrEmpty(p.characterName)
+                    && p.characterName.ToLowerInvariant().Contains(t))
+                    return p;
+
+            return defaultPlayer;
+        }
+
+        /// <summary>
         /// Executes every command in the GM_ACTIONS block.
         /// Returns human-readable result lines to display as system messages.
         /// </summary>
@@ -65,52 +101,67 @@ namespace DnD.AI
             switch (cmd)
             {
                 case "MOVE":
-                    // MOVE player <direction>
-                    if (p.Length >= 3 && p[1].ToLower() == "player")
+                    // MOVE <target> <direction>   (target = "player" | "player_N" | name)
+                    if (p.Length >= 3)
                     {
+                        var target = ResolveTarget(p[1], player);
+                        var ctrl = MapCharacterController.For(target) ?? MapCharacterController.Instance;
                         var (dx, dy) = DirToVector(p[2]);
-                        bool ok = MapCharacterController.Instance?.TryMove(dx, dy) ?? false;
-                        out_.Add(ok ? $"You move {p[2]}." : $"Something blocks your path to the {p[2]}.");
+                        bool ok = ctrl?.TryMove(dx, dy) ?? false;
+                        string who = target?.characterName ?? "Player";
+                        out_.Add(ok ? $"{who} moves {p[2]}." : $"Something blocks {who}'s path to the {p[2]}.");
                     }
                     break;
 
                 case "DAMAGE":
-                    // DAMAGE player <amount>
-                    if (p.Length >= 3 && p[1].ToLower() == "player" && player != null
-                        && int.TryParse(p[2], out int dmg))
+                    // DAMAGE <target> <amount>
+                    if (p.Length >= 3 && int.TryParse(p[2], out int dmg))
                     {
-                        player.TakeDamage(dmg);
-                        out_.Add($"You take {dmg} damage! ({player.currentHitPoints}/{player.maxHitPoints} HP)");
+                        var target = ResolveTarget(p[1], player);
+                        if (target != null)
+                        {
+                            target.TakeDamage(dmg);
+                            out_.Add($"{target.characterName} takes {dmg} damage! ({target.currentHitPoints}/{target.maxHitPoints} HP)");
+                        }
                     }
                     break;
 
                 case "HEAL":
-                    // HEAL player <amount>
-                    if (p.Length >= 3 && p[1].ToLower() == "player" && player != null
-                        && int.TryParse(p[2], out int heal))
+                    // HEAL <target> <amount>
+                    if (p.Length >= 3 && int.TryParse(p[2], out int heal))
                     {
-                        player.Heal(heal);
-                        out_.Add($"You recover {heal} HP. ({player.currentHitPoints}/{player.maxHitPoints} HP)");
+                        var target = ResolveTarget(p[1], player);
+                        if (target != null)
+                        {
+                            target.Heal(heal);
+                            out_.Add($"{target.characterName} recovers {heal} HP. ({target.currentHitPoints}/{target.maxHitPoints} HP)");
+                        }
                     }
                     break;
 
                 case "ADD_CONDITION":
-                    // ADD_CONDITION player <condition>
-                    if (p.Length >= 3 && p[1].ToLower() == "player" && player != null
-                        && System.Enum.TryParse<Condition>(p[2], true, out Condition addCond))
+                    // ADD_CONDITION <target> <condition>
+                    if (p.Length >= 3 && System.Enum.TryParse<Condition>(p[2], true, out Condition addCond))
                     {
-                        player.AddCondition(addCond, 3);
-                        out_.Add($"You are now {p[2]}.");
+                        var target = ResolveTarget(p[1], player);
+                        if (target != null)
+                        {
+                            target.AddCondition(addCond, 3);
+                            out_.Add($"{target.characterName} is now {p[2]}.");
+                        }
                     }
                     break;
 
                 case "REMOVE_CONDITION":
-                    // REMOVE_CONDITION player <condition>
-                    if (p.Length >= 3 && p[1].ToLower() == "player" && player != null
-                        && System.Enum.TryParse<Condition>(p[2], true, out Condition remCond))
+                    // REMOVE_CONDITION <target> <condition>
+                    if (p.Length >= 3 && System.Enum.TryParse<Condition>(p[2], true, out Condition remCond))
                     {
-                        player.RemoveCondition(remCond);
-                        out_.Add($"You are no longer {p[2]}.");
+                        var target = ResolveTarget(p[1], player);
+                        if (target != null)
+                        {
+                            target.RemoveCondition(remCond);
+                            out_.Add($"{target.characterName} is no longer {p[2]}.");
+                        }
                     }
                     break;
 
@@ -235,23 +286,23 @@ namespace DnD.AI
             {
                 new LLMTool("MOVE",
                     "Move the player one tile in a cardinal direction.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"direction\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\"]}},\"required\":[\"target\",\"direction\"]}"),
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"direction\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\"]}},\"required\":[\"target\",\"direction\"]}"),
 
                 new LLMTool("DAMAGE",
                     "Deal damage to the player.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"target\",\"amount\"]}"),
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"target\",\"amount\"]}"),
 
                 new LLMTool("HEAL",
                     "Heal the player by amount HP.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"target\",\"amount\"]}"),
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"amount\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"target\",\"amount\"]}"),
 
                 new LLMTool("ADD_CONDITION",
                     "Apply a D&D 5e condition to the player.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"condition\":{\"type\":\"string\"}},\"required\":[\"target\",\"condition\"]}"),
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"condition\":{\"type\":\"string\"}},\"required\":[\"target\",\"condition\"]}"),
 
                 new LLMTool("REMOVE_CONDITION",
                     "Remove a D&D 5e condition from the player.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"enum\":[\"player\"]},\"condition\":{\"type\":\"string\"}},\"required\":[\"target\",\"condition\"]}"),
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"condition\":{\"type\":\"string\"}},\"required\":[\"target\",\"condition\"]}"),
 
                 new LLMTool("SPAWN_ENEMY",
                     "Spawn a hostile creature and start combat.",
@@ -299,44 +350,51 @@ namespace DnD.AI
                         var a = JsonUtility.FromJson<MoveArgs>(argsJson) ?? new MoveArgs();
                         var (dx, dy) = DirToVector(a.direction ?? "");
                         if (dx == 0 && dy == 0) return $"Unknown direction: {a.direction}";
-                        bool ok = MapCharacterController.Instance?.TryMove(dx, dy) ?? false;
-                        return ok ? $"Player moved {a.direction}." : $"Move blocked: path to {a.direction} is impassable.";
+                        var target = ResolveTarget(a.target, player);
+                        var ctrl = MapCharacterController.For(target) ?? MapCharacterController.Instance;
+                        bool ok = ctrl?.TryMove(dx, dy) ?? false;
+                        string who = target?.characterName ?? "Player";
+                        return ok ? $"{who} moved {a.direction}." : $"Move blocked: {who}'s path to {a.direction} is impassable.";
                     }
 
                     case "DAMAGE":
                     {
                         var a = JsonUtility.FromJson<AmountArgs>(argsJson) ?? new AmountArgs();
-                        if (player == null) return "No player character available.";
-                        player.TakeDamage(a.amount);
-                        return $"Player took {a.amount} damage. HP {player.currentHitPoints}/{player.maxHitPoints}.";
+                        var target = ResolveTarget(a.target, player);
+                        if (target == null) return "No matching character.";
+                        target.TakeDamage(a.amount);
+                        return $"{target.characterName} took {a.amount} damage. HP {target.currentHitPoints}/{target.maxHitPoints}.";
                     }
 
                     case "HEAL":
                     {
                         var a = JsonUtility.FromJson<AmountArgs>(argsJson) ?? new AmountArgs();
-                        if (player == null) return "No player character available.";
-                        player.Heal(a.amount);
-                        return $"Player healed {a.amount} HP. HP {player.currentHitPoints}/{player.maxHitPoints}.";
+                        var target = ResolveTarget(a.target, player);
+                        if (target == null) return "No matching character.";
+                        target.Heal(a.amount);
+                        return $"{target.characterName} healed {a.amount} HP. HP {target.currentHitPoints}/{target.maxHitPoints}.";
                     }
 
                     case "ADD_CONDITION":
                     {
                         var a = JsonUtility.FromJson<ConditionArgs>(argsJson) ?? new ConditionArgs();
-                        if (player == null) return "No player character available.";
+                        var target = ResolveTarget(a.target, player);
+                        if (target == null) return "No matching character.";
                         if (!System.Enum.TryParse<Condition>(a.condition ?? "", true, out var cond))
                             return $"Unknown condition: {a.condition}.";
-                        player.AddCondition(cond, 3);
-                        return $"Player is now {a.condition}.";
+                        target.AddCondition(cond, 3);
+                        return $"{target.characterName} is now {a.condition}.";
                     }
 
                     case "REMOVE_CONDITION":
                     {
                         var a = JsonUtility.FromJson<ConditionArgs>(argsJson) ?? new ConditionArgs();
-                        if (player == null) return "No player character available.";
+                        var target = ResolveTarget(a.target, player);
+                        if (target == null) return "No matching character.";
                         if (!System.Enum.TryParse<Condition>(a.condition ?? "", true, out var cond))
                             return $"Unknown condition: {a.condition}.";
-                        player.RemoveCondition(cond);
-                        return $"Player is no longer {a.condition}.";
+                        target.RemoveCondition(cond);
+                        return $"{target.characterName} is no longer {a.condition}.";
                     }
 
                     case "SPAWN_ENEMY":
