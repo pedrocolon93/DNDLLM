@@ -590,13 +590,14 @@ namespace DnD.Managers
                 if (ent == null) continue;
                 saveData.entities.Add(new DnD.Data.EntityEntry
                 {
-                    name    = ent.EntityName,
-                    x       = ent.GridX,
-                    y       = ent.GridY,
-                    hp      = ent.HP,
-                    maxHp   = ent.MaxHP,
-                    ac      = ent.AC,
-                    isEnemy = ent.IsEnemy,
+                    name     = ent.EntityName,
+                    x        = ent.GridX,
+                    y        = ent.GridY,
+                    hp       = ent.HP,
+                    maxHp    = ent.MaxHP,
+                    ac       = ent.AC,
+                    isEnemy  = ent.IsEnemy,
+                    isHidden = ent.IsHidden,
                 });
                 var sr  = ent.GetComponent<UnityEngine.SpriteRenderer>();
                 entitySprites.Add(sr != null && sr.sprite != null ? sr.sprite.texture as UnityEngine.Texture2D : null);
@@ -723,6 +724,7 @@ namespace DnD.Managers
             "  SPAWN_ENEMY <name> <hp> <ac>\n" +
             "  AWARD_XP <amount>\n" +
             "  KILL_ENTITY <name>             (removes an enemy/NPC from the map)\n" +
+            "  REVEAL_ENTITY <name>           (reveals a hidden entity — used when the player notices it)\n" +
             "  LOCK_DOOR <x> <y>              (bars a passage — player cannot pass)\n" +
             "  UNLOCK_DOOR <x> <y>            (opens a previously locked passage)\n" +
             "  ENTER_SUBREGION <description>  (transport player into a named sub-area, e.g. 'dark armory' or 'flooded cellar')\n\n" +
@@ -889,7 +891,7 @@ namespace DnD.Managers
                 UnityEngine.Texture2D tex = (sprites != null && i < sprites.Count) ? sprites[i] : null;
                 // Initialize sets HP=MaxHP=hp; pass maxHp first then override HP so we keep
                 // any "took N damage" state across reloads.
-                ec.Initialize(tex, e.name, e.x, e.y, e.maxHp, e.ac, e.isEnemy);
+                ec.Initialize(tex, e.name, e.x, e.y, e.maxHp, e.ac, e.isEnemy, e.isHidden);
                 ec.HP = e.hp;
             }
         }
@@ -1157,13 +1159,36 @@ namespace DnD.Managers
                 default:                  role = "friendly NPC";                          fallbackName = "Villager";  break;
             }
 
-            // Ask LLM for a 2-4 word name
-            string nameRaw = await LLMService.Instance.SendPrompt(
-                "You are a D&D world builder. Reply with ONLY a 2-4 word creature or character name, no punctuation.",
-                $"In a {gen.LastTheme} setting, name one {role} that fits the environment.");
-            string entityName = string.IsNullOrEmpty(nameRaw) ? fallbackName : nameRaw.Trim();
+            // Ask LLM for both a 2-4 word name AND whether the entity is concealed.
+            // Reply format keeps it parseable without JsonUtility.
+            string raw = await LLMService.Instance.SendPrompt(
+                "You are a D&D world builder. Reply with EXACTLY two lines:\n" +
+                "NAME: <2-4 word creature or character name, no punctuation>\n" +
+                "HIDDEN: <true|false>\n" +
+                "Set HIDDEN to true ONLY when concealment is dramatically appropriate " +
+                "(stalking predator, ambush, lurking horror, hidden trap or watcher). " +
+                "Default to false otherwise — most NPCs and visible monsters are not hidden.",
+                $"In a {gen.LastTheme} setting, describe one {role} that fits the environment.");
+            string entityName = fallbackName;
+            bool   isHidden   = false;
+            if (!string.IsNullOrEmpty(raw))
+            {
+                foreach (var rawLine in raw.Split('\n'))
+                {
+                    string line = rawLine.Trim();
+                    int colon = line.IndexOf(':');
+                    if (colon < 0) continue;
+                    string key = line.Substring(0, colon).Trim().ToUpperInvariant();
+                    string val = line.Substring(colon + 1).Trim();
+                    if (key == "NAME" && !string.IsNullOrEmpty(val)) entityName = val;
+                    else if (key == "HIDDEN") isHidden = val.StartsWith("t", System.StringComparison.OrdinalIgnoreCase)
+                                                     || val == "1" || val.StartsWith("y", System.StringComparison.OrdinalIgnoreCase);
+                }
+            }
 
-            if (ChatUI.Instance != null)
+            // Suppress the public "Generating sprite for X..." message for hidden entities
+            // so the player doesn't immediately know what's lurking on the map.
+            if (ChatUI.Instance != null && !isHidden)
                 ChatUI.Instance.AddSystemMessage($"Generating sprite for {entityName}...");
 
             string kind = isEnemy ? "fearsome monster" : "NPC character";
@@ -1186,7 +1211,8 @@ namespace DnD.Managers
                 tex, entityName, x, y,
                 hp: isEnemy ? UnityEngine.Random.Range(8, 20) : 10,
                 ac: isEnemy ? UnityEngine.Random.Range(10, 14) : 10,
-                isEnemy: isEnemy);
+                isEnemy: isEnemy,
+                isHidden: isHidden);
         }
 
         private async void HandlePlayerInput(string input)
