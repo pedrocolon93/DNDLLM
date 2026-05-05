@@ -105,6 +105,60 @@ namespace DNDLLM.Map
                 await GenerateMapPerTileAsync(keywords);
         }
 
+        /// <summary>
+        /// Skip the LLM holistic-paint pipeline and reuse a previously saved background +
+        /// grid state. Mirrors the post-paint phases of GenerateMapStrategyDAsync (background
+        /// sprite, OnMapReady, camera) so callers get the same observable behaviour.
+        /// </summary>
+        public void RehydrateFromSavedState(
+            Texture2D backgroundTex,
+            string keywords,
+            IList<DnD.Data.TileGridEntry> savedTiles)
+        {
+            if (backgroundTex == null)
+            {
+                Debug.LogWarning("[MapGenerator] RehydrateFromSavedState called with null background; aborting.");
+                return;
+            }
+
+            Debug.Log($"[MapGenerator] Rehydrate from save: {keywords} ({savedTiles?.Count ?? 0} tiles)");
+            foreach (Transform child in transform) Destroy(child.gameObject);
+
+            _lastTheme = string.IsNullOrEmpty(keywords) ? "dungeon" : keywords.Split(',')[0].Trim();
+
+            // Hydrate grid[,] directly from the save (skipping the per-cell overlay loop in
+            // OnMapReadyNarrate; that loop becomes a no-op when the grid is already correct).
+            grid = new MapTile[width, height];
+            for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                grid[x, y] = new MapTile { x = x, y = y, type = TileType.Floor, walkable = true, description = "" };
+
+            if (savedTiles != null)
+            {
+                foreach (var entry in savedTiles)
+                {
+                    if (entry.x < 0 || entry.x >= width || entry.y < 0 || entry.y >= height) continue;
+                    if (System.Enum.TryParse<TileType>(entry.tileType, out TileType t))
+                    {
+                        grid[entry.x, entry.y].type     = t;
+                        grid[entry.x, entry.y].walkable = t == TileType.Floor || t == TileType.Exit
+                                                       || t == TileType.Door  || t == TileType.NpcSpawn;
+                    }
+                    grid[entry.x, entry.y].description = entry.description ?? "";
+                }
+            }
+
+            StyleAnchor = backgroundTex;
+            CreateBigBackgroundSprite(backgroundTex);
+            LogLayout();
+
+            if (DnD.UI.ChatUI.Instance != null)
+                DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Map restored from save.");
+
+            OnMapReady?.Invoke();
+            AdjustCamera();
+        }
+
         // ── Strategy D: holistic paint + evaluate/refine ────────────────────
 
         private async Task GenerateMapStrategyDAsync(string keywords)
