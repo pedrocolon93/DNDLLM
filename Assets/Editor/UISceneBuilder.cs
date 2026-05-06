@@ -197,7 +197,7 @@ public static class UISceneBuilder
         btnTextRT.offsetMin = Vector2.zero; btnTextRT.offsetMax = Vector2.zero;
         var btnTMP = btnTextGO.AddComponent<TextMeshProUGUI>();
         btnTMP.text = "Send";
-        btnTMP.fontSize = 20;
+        btnTMP.fontSize = 13;
         btnTMP.color = UITheme.BackgroundDeep;
         btnTMP.alignment = TextAlignmentOptions.Center;
 
@@ -1589,6 +1589,7 @@ public static class UISceneBuilder
         SetProp(editSO, "regenerateButton",  regenBtn);
         SetProp(editSO, "applyButton",       applyBtn);
         SetProp(editSO, "saveButton",        saveEditorBtn);
+        SetProp(editSO, "closeButton",       closeHdrBtn);
         editSO.ApplyModifiedProperties();
 
         // Wire Save button callback after panel has fields
@@ -1815,6 +1816,7 @@ public static class UISceneBuilder
         SetArrayProp(charSO, "abilityLabels", abilityLabels);
         SetProp(charSO, "appearanceText",  appearTextTMP);
         SetProp(charSO, "backstoryText",   backstoryTextTMP);
+        SetProp(charSO, "closeButton",     closeHdrBtn);
         charSO.ApplyModifiedProperties();
 
         // Wire to GameManager
@@ -1894,14 +1896,10 @@ public static class UISceneBuilder
 
         MenuMakeDivider(panelGO.transform, UITheme.SystemText, 1);
 
-        // Tile regeneration header
-        MenuMakeLabel(panelGO.transform, "REGENERATE TILE", 11f, UITheme.SystemText,
-            TextAlignmentOptions.Center, 20);
-
-        // Tile list container — let the parent VLG own sizing (flexibleHeight = 1) and have
-        // this VLG honor each row's LayoutElement.preferredHeight. ContentSizeFitter conflicts
-        // with flexibleHeight, so we don't use one here.
-        var listGO = MakeGO("TileListContainer", panelGO.transform);
+        // Controls container — hosts the DM voice toggles built at runtime by
+        // InGameMenuPanel.RebuildTTSRows. (The per-tile regenerate rows used to live
+        // here too; tile regeneration is now reachable from the EditMapPanel only.)
+        var listGO = MakeGO("ControlsContainer", panelGO.transform);
         var listVLG = listGO.AddComponent<VerticalLayoutGroup>();
         listVLG.spacing                = 2;
         listVLG.childForceExpandWidth  = true;
@@ -1916,9 +1914,14 @@ public static class UISceneBuilder
         var resumeBtn = MenuMakeButton(panelGO.transform, "RESUME ADVENTURE", UITheme.DmText);
         resumeBtn.onClick.AddListener(() => menuPanel.Close());
 
-        // Wire tileListContainer on InGameMenuPanel
+        // Wire button + container references onto the panel. The InGameMenuPanel re-binds
+        // the click listeners in OnEnable each time the menu opens, since editor-time
+        // AddListener calls are non-persistent and would otherwise be lost on scene save.
         var menuSO = new SerializedObject(menuPanel);
-        menuSO.FindProperty("tileListContainer").objectReferenceValue = listGO;
+        menuSO.FindProperty("controlsContainer").objectReferenceValue = listGO;
+        menuSO.FindProperty("saveButton").objectReferenceValue        = saveBtn;
+        menuSO.FindProperty("loadButton").objectReferenceValue        = loadBtn;
+        menuSO.FindProperty("resumeButton").objectReferenceValue      = resumeBtn;
         menuSO.ApplyModifiedProperties();
 
         // Wire inGameMenuPanel on GameManager

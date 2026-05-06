@@ -28,6 +28,7 @@ namespace DnD.UI
         [SerializeField] private Button          regenerateButton;
         [SerializeField] private Button          applyButton;
         [SerializeField] private Button          saveButton;
+        [SerializeField] private Button          closeButton;
 
         // ── State ────────────────────────────────────────────────────────────
         private int _selectedX = -1, _selectedY = -1;
@@ -37,6 +38,33 @@ namespace DnD.UI
         {
             if (Instance == null) Instance = this;
             else { Destroy(gameObject); return; }
+        }
+
+        // The editor-time AddListener calls in UISceneBuilder are non-persistent and don't
+        // survive scene save. Re-bind every button here each time the panel opens so they
+        // actually fire regardless of editor vs. play-mode entry path.
+        private void OnEnable()
+        {
+            if (closeButton != null)
+            {
+                closeButton.onClick.RemoveAllListeners();
+                closeButton.onClick.AddListener(Close);
+            }
+            if (applyButton != null)
+            {
+                applyButton.onClick.RemoveAllListeners();
+                applyButton.onClick.AddListener(ApplyCurrentTileEdits);
+            }
+            if (regenerateButton != null)
+            {
+                regenerateButton.onClick.RemoveAllListeners();
+                regenerateButton.onClick.AddListener(RegenerateSelectedTile);
+            }
+            if (saveButton != null)
+            {
+                saveButton.onClick.RemoveAllListeners();
+                saveButton.onClick.AddListener(() => OnSaveRequested?.Invoke());
+            }
         }
 
         // ── Public API ───────────────────────────────────────────────────────
