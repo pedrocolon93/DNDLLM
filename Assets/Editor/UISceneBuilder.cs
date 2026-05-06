@@ -265,6 +265,23 @@ public static class UISceneBuilder
         var editMapBtn   = MakeHudButton("EditMapButton",   "•  EDIT MAP",  -102f);
         var characterBtn = MakeHudButton("CharacterButton", "†  CHARACTER", -196f);
 
+        // ── Turn-order strip — top-center, anchored above the chat/map split ──
+        // Single TMP_Text driven by GameManager via the TurnQueue.OnTurnChanged event.
+        // Reads e.g. "▶ Aric → Lyra → Goblin" with the active entry styled gold/bold.
+        var turnStripGO = MakeGO("TurnStrip", canvasGO.transform);
+        var turnStripRT = turnStripGO.GetComponent<RectTransform>();
+        turnStripRT.anchorMin        = new Vector2(0.5f, 1f);
+        turnStripRT.anchorMax        = new Vector2(0.5f, 1f);
+        turnStripRT.pivot            = new Vector2(0.5f, 1f);
+        turnStripRT.anchoredPosition = new Vector2(0f, -8f);
+        turnStripRT.sizeDelta        = new Vector2(540f, 28f);
+        var turnStripTMP = turnStripGO.AddComponent<TextMeshProUGUI>();
+        turnStripTMP.text       = "";
+        turnStripTMP.fontSize   = 13f;
+        turnStripTMP.color      = UITheme.SystemText;
+        turnStripTMP.alignment  = TextAlignmentOptions.Center;
+        turnStripTMP.characterSpacing = 1f;
+
         // Wire to GameManager if present
         var gameSystemGO = GameObject.Find("GameSystem");
         if (gameSystemGO != null)
@@ -276,6 +293,8 @@ public static class UISceneBuilder
                 gmSO.FindProperty("menuButton").objectReferenceValue      = menuBtn;
                 gmSO.FindProperty("editMapButton").objectReferenceValue   = editMapBtn;
                 gmSO.FindProperty("characterButton").objectReferenceValue = characterBtn;
+                var turnStripProp = gmSO.FindProperty("turnStripText");
+                if (turnStripProp != null) turnStripProp.objectReferenceValue = turnStripTMP;
                 gmSO.ApplyModifiedProperties();
             }
         }
