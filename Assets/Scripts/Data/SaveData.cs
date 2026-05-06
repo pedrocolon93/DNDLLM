@@ -34,6 +34,10 @@ namespace DnD.Data
         // Game state
         public string gameState;   // GameState.ToString()
 
+        // Player position on the current map (zero on first save → falls back to default start)
+        public int playerX;
+        public int playerY;
+
         // Full conversation history
         public List<ChatMessageData> messages = new List<ChatMessageData>();
 
@@ -42,6 +46,9 @@ namespace DnD.Data
 
         // Full per-tile grid state (captures EditMapPanel changes and map graph edits)
         public List<TileGridEntry> tileGrid = new List<TileGridEntry>();
+
+        // Enemies / NPCs spawned on the current map (sprite textures persisted alongside as PNGs)
+        public List<EntityEntry> entities = new List<EntityEntry>();
 
         // TTS preference (per-slot)
         public bool audioAutoplay = false;
@@ -68,6 +75,17 @@ namespace DnD.Data
         public int    x, y;
         public string tileType;    // TileType.ToString()
         public string description;
+    }
+
+    /// <summary>An enemy or NPC on the current map. Sprite is saved separately as slot_{i}_entity_{idx}.png.</summary>
+    [Serializable]
+    public class EntityEntry
+    {
+        public string name;
+        public int    x, y;
+        public int    hp, maxHp, ac;
+        public bool   isEnemy;
+        public bool   isHidden; // when true the sprite is suppressed until REVEAL_ENTITY flips it
     }
 
     // Passed from CharacterCreationPopup to GameManager on completion

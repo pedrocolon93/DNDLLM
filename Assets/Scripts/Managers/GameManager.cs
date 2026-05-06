@@ -54,6 +54,12 @@ namespace DnD.Managers
         private Texture2D _characterMapToken; // top-down sprite shown on the map; persisted per save slot
         private List<DnD.Data.TileDescriptionEntry> _pendingTileDescriptions;
         private List<DnD.Data.TileGridEntry>        _pendingTileGrid;
+        // Save-state queued by LoadSlot, consumed during StartExploration / OnMapReadyNarrate.
+        // When _pendingMapBackground is non-null, the LLM holistic-paint pipeline is skipped.
+        private Texture2D                           _pendingMapBackground;
+        private int                                 _pendingPlayerX, _pendingPlayerY;
+        private List<DnD.Data.EntityEntry>          _pendingEntities;
+        private List<Texture2D>                     _pendingEntitySprites;
         private readonly MapGraph _mapGraph = new MapGraph();
 
         private DungeonMaster dungeonMaster;
@@ -112,7 +118,6 @@ namespace DnD.Managers
                 {
                     inGameMenuPanel.OnSave            = OnSaveFromMenu;
                     inGameMenuPanel.OnLoad            = OnLoadFromMenu;
-                    inGameMenuPanel.OnRegenerateTile  = OnRegenerateTileFromMenu;
                     inGameMenuPanel.OnTTSEnabledChanged = v =>
                     {
                         if (DNDLLM.Services.TTSService.Instance != null)
@@ -349,8 +354,7 @@ namespace DnD.Managers
             int slot = 0;
             for (int i = 0; i < 3; i++)
             {
-                var (data, _, _) = DNDLLM.Services.SaveSystem.Load(i);
-                if (data == null) { slot = i; break; }
+                if (DNDLLM.Services.SaveSystem.Load(i) == null) { slot = i; break; }
             }
             _currentSlotIndex = slot;
 
@@ -459,13 +463,6 @@ namespace DnD.Managers
             ChangeState(GameState.MainMenu);
         }
 
-        private async void OnRegenerateTileFromMenu(int x, int y)
-        {
-            inGameMenuPanel?.Close();
-            if (MapGenerator.Instance != null)
-                await MapGenerator.Instance.RegenerateTileAsync(x, y);
-        }
-
         private void OnSaveButtonPressed()
         {
             if (currentState == GameState.Exploration ||
@@ -552,6 +549,7 @@ namespace DnD.Managers
             saveData.backstory  = _backstory;
 
             // Persist tile descriptions and full per-tile grid state (captures EditMapPanel changes)
+            UnityEngine.Texture2D savedMapBackground = null;
             if (MapGenerator.Instance?.grid != null)
             {
                 var gen = MapGenerator.Instance;
@@ -566,22 +564,55 @@ namespace DnD.Managers
                         tileType    = gen.grid[gx, gy].type.ToString(),
                         description = gen.grid[gx, gy].description,
                     });
+                savedMapBackground = gen.StyleAnchor; // the painted holistic battlemap with grid
+            }
+
+            // Capture player grid position so reload doesn't reset to the south entrance
+            if (MapCharacterController.Instance != null)
+            {
+                saveData.playerX = MapCharacterController.Instance.GridX;
+                saveData.playerY = MapCharacterController.Instance.GridY;
+            }
+
+            // Capture every enemy/NPC currently on the map plus their sprite textures
+            saveData.entities = new List<DnD.Data.EntityEntry>();
+            var entitySprites = new List<UnityEngine.Texture2D>();
+            foreach (var ent in MapEntityController.All)
+            {
+                if (ent == null) continue;
+                saveData.entities.Add(new DnD.Data.EntityEntry
+                {
+                    name     = ent.EntityName,
+                    x        = ent.GridX,
+                    y        = ent.GridY,
+                    hp       = ent.HP,
+                    maxHp    = ent.MaxHP,
+                    ac       = ent.AC,
+                    isEnemy  = ent.IsEnemy,
+                    isHidden = ent.IsHidden,
+                });
+                var sr  = ent.GetComponent<UnityEngine.SpriteRenderer>();
+                entitySprites.Add(sr != null && sr.sprite != null ? sr.sprite.texture as UnityEngine.Texture2D : null);
             }
 
             UnityEngine.Texture2D savePortrait = portrait ?? _characterPortrait;
-            DNDLLM.Services.SaveSystem.Save(_currentSlotIndex, saveData, savePortrait, _characterMapToken);
-            Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel}");
+            DNDLLM.Services.SaveSystem.Save(
+                _currentSlotIndex, saveData,
+                savePortrait, _characterMapToken, savedMapBackground, entitySprites);
+            Debug.Log($"[GameManager] Saved slot {_currentSlotIndex}: {saveData.slotLabel} ({saveData.entities.Count} entities, map={(savedMapBackground != null ? "yes" : "no")})");
         }
 
         private void LoadSlot(int slotIndex)
         {
-            var (data, portrait, mapToken) = DNDLLM.Services.SaveSystem.Load(slotIndex);
-            if (data == null)
+            var loaded = DNDLLM.Services.SaveSystem.Load(slotIndex);
+            if (loaded == null || loaded.Data == null)
             {
                 Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
                 ChangeState(GameState.MainMenu);
                 return;
             }
+
+            var data = loaded.Data;
 
             // Clear any entities and world graph from a previous session
             MapEntityController.ClearAll();
@@ -591,14 +622,21 @@ namespace DnD.Managers
             _campaignSeed            = data.campaignSeed ?? "";
             _appearanceDescription   = data.appearanceDescription ?? "";
             _backstory               = data.backstory ?? "";
-            _characterPortrait       = portrait;
-            _characterMapToken       = mapToken;
+            _characterPortrait       = loaded.Portrait;
+            _characterMapToken       = loaded.MapToken;
 
             // Queue tile descriptions and per-tile grid to be applied once the map finishes generating
             _pendingTileDescriptions = (data.tileDescriptions != null && data.tileDescriptions.Count > 0)
                 ? data.tileDescriptions : null;
             _pendingTileGrid = (data.tileGrid != null && data.tileGrid.Count > 0)
                 ? data.tileGrid : null;
+
+            // Map background and entity sprites: queued for rehydrate-instead-of-regen on map ready
+            _pendingMapBackground = loaded.MapBackground;
+            _pendingPlayerX       = data.playerX;
+            _pendingPlayerY       = data.playerY;
+            _pendingEntities      = (data.entities != null && data.entities.Count > 0) ? data.entities : null;
+            _pendingEntitySprites = loaded.EntitySprites;
 
             if (DNDLLM.Services.TTSService.Instance != null)
                 DNDLLM.Services.TTSService.Instance.AutoPlay = data.audioAutoplay;
@@ -678,6 +716,7 @@ namespace DnD.Managers
             "  SPAWN_ENEMY <name> <hp> <ac>\n" +
             "  AWARD_XP <amount>\n" +
             "  KILL_ENTITY <name>             (removes an enemy/NPC from the map)\n" +
+            "  REVEAL_ENTITY <name>           (reveals a hidden entity — used when the player notices it)\n" +
             "  LOCK_DOOR <x> <y>              (bars a passage — player cannot pass)\n" +
             "  UNLOCK_DOOR <x> <y>            (opens a previously locked passage)\n" +
             "  ENTER_SUBREGION <description>  (transport player into a named sub-area, e.g. 'dark armory' or 'flooded cellar')\n\n" +
@@ -711,6 +750,22 @@ namespace DnD.Managers
             MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
             // Skip LLM description generation when we have saved descriptions to restore
             MapGenerator.Instance.SkipDescriptionGeneration = _pendingTileDescriptions != null;
+
+            // If LoadSlot left us a saved map background, skip the 30-60s LLM holistic-paint
+            // pipeline entirely and rebuild the visible map from the cached PNG + saved tile grid.
+            if (_pendingMapBackground != null && _pendingTileGrid != null)
+            {
+                MapGenerator.Instance.RehydrateFromSavedState(
+                    _pendingMapBackground,
+                    _campaignSeed.Length > 0 ? _campaignSeed : "dungeon",
+                    _pendingTileGrid);
+                _pendingMapBackground = null;
+                // _pendingTileGrid stays consumed inside Rehydrate; clear so OnMapReadyNarrate's
+                // overlay loop doesn't double-apply.
+                _pendingTileGrid = null;
+                return;
+            }
+
             MapGenerator.Instance.GenerateMap(
                 _campaignSeed.Length > 0 ? _campaignSeed : "dungeon");
         }
@@ -779,8 +834,29 @@ namespace DnD.Managers
             // ── 2. Generate and place character token on the map ─────────
             await SpawnCharacterOnMapAsync();
 
+            // After spawn, restore the saved grid position so reload doesn't reset to the
+            // south entrance. (0,0) is treated as "no saved position" — character stays at
+            // SpawnCharacterOnMapAsync's default start cell.
+            if (MapCharacterController.Instance != null && (_pendingPlayerX != 0 || _pendingPlayerY != 0))
+            {
+                MapCharacterController.Instance.MoveTo(_pendingPlayerX, _pendingPlayerY);
+                _pendingPlayerX = 0;
+                _pendingPlayerY = 0;
+            }
+
             // ── 3. Spawn enemy / NPC tokens ───────────────────────────────
-            await SpawnMapEntitiesAsync();
+            // If LoadSlot queued saved entities, rehydrate from the saved sprites + state
+            // (preserving HP, names, positions). Otherwise generate fresh entities.
+            if (_pendingEntities != null)
+            {
+                RehydrateEntitiesFromSave(_pendingEntities, _pendingEntitySprites);
+                _pendingEntities      = null;
+                _pendingEntitySprites = null;
+            }
+            else
+            {
+                await SpawnMapEntitiesAsync();
+            }
 
             // ── 4. Save root snapshot into map graph ─────────────────────
             var cc = MapCharacterController.Instance;
@@ -791,6 +867,25 @@ namespace DnD.Managers
             SaveCurrentSlot();
             if (ChatUI.Instance != null)
                 ChatUI.Instance.AddSystemMessage("Adventure saved.");
+        }
+
+        /// <summary>Recreate entity GameObjects from saved entries + sprite textures (no LLM calls).</summary>
+        private static void RehydrateEntitiesFromSave(
+            List<DnD.Data.EntityEntry> entries,
+            List<UnityEngine.Texture2D> sprites)
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                var go = new GameObject($"Entity_{e.name}_{e.x}_{e.y}");
+                go.AddComponent<UnityEngine.SpriteRenderer>();
+                var ec = go.AddComponent<MapEntityController>();
+                UnityEngine.Texture2D tex = (sprites != null && i < sprites.Count) ? sprites[i] : null;
+                // Initialize sets HP=MaxHP=hp; pass maxHp first then override HP so we keep
+                // any "took N damage" state across reloads.
+                ec.Initialize(tex, e.name, e.x, e.y, e.maxHp, e.ac, e.isEnemy, e.isHidden);
+                ec.HP = e.hp;
+            }
         }
 
         private async Task SpawnCharacterOnMapAsync()
@@ -1056,13 +1151,36 @@ namespace DnD.Managers
                 default:                  role = "friendly NPC";                          fallbackName = "Villager";  break;
             }
 
-            // Ask LLM for a 2-4 word name
-            string nameRaw = await LLMService.Instance.SendPrompt(
-                "You are a D&D world builder. Reply with ONLY a 2-4 word creature or character name, no punctuation.",
-                $"In a {gen.LastTheme} setting, name one {role} that fits the environment.");
-            string entityName = string.IsNullOrEmpty(nameRaw) ? fallbackName : nameRaw.Trim();
+            // Ask LLM for both a 2-4 word name AND whether the entity is concealed.
+            // Reply format keeps it parseable without JsonUtility.
+            string raw = await LLMService.Instance.SendPrompt(
+                "You are a D&D world builder. Reply with EXACTLY two lines:\n" +
+                "NAME: <2-4 word creature or character name, no punctuation>\n" +
+                "HIDDEN: <true|false>\n" +
+                "Set HIDDEN to true ONLY when concealment is dramatically appropriate " +
+                "(stalking predator, ambush, lurking horror, hidden trap or watcher). " +
+                "Default to false otherwise — most NPCs and visible monsters are not hidden.",
+                $"In a {gen.LastTheme} setting, describe one {role} that fits the environment.");
+            string entityName = fallbackName;
+            bool   isHidden   = false;
+            if (!string.IsNullOrEmpty(raw))
+            {
+                foreach (var rawLine in raw.Split('\n'))
+                {
+                    string line = rawLine.Trim();
+                    int colon = line.IndexOf(':');
+                    if (colon < 0) continue;
+                    string key = line.Substring(0, colon).Trim().ToUpperInvariant();
+                    string val = line.Substring(colon + 1).Trim();
+                    if (key == "NAME" && !string.IsNullOrEmpty(val)) entityName = val;
+                    else if (key == "HIDDEN") isHidden = val.StartsWith("t", System.StringComparison.OrdinalIgnoreCase)
+                                                     || val == "1" || val.StartsWith("y", System.StringComparison.OrdinalIgnoreCase);
+                }
+            }
 
-            if (ChatUI.Instance != null)
+            // Suppress the public "Generating sprite for X..." message for hidden entities
+            // so the player doesn't immediately know what's lurking on the map.
+            if (ChatUI.Instance != null && !isHidden)
                 ChatUI.Instance.AddSystemMessage($"Generating sprite for {entityName}...");
 
             string kind = isEnemy ? "fearsome monster" : "NPC character";
@@ -1085,7 +1203,8 @@ namespace DnD.Managers
                 tex, entityName, x, y,
                 hp: isEnemy ? UnityEngine.Random.Range(8, 20) : 10,
                 ac: isEnemy ? UnityEngine.Random.Range(10, 14) : 10,
-                isEnemy: isEnemy);
+                isEnemy: isEnemy,
+                isHidden: isHidden);
         }
 
         private async void HandlePlayerInput(string input)

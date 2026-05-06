@@ -17,6 +17,22 @@ namespace DNDLLM.Map
         public int GridX, GridY;
 
         private SpriteRenderer _sr;
+        private bool _isHidden;
+
+        /// <summary>
+        /// When true, the sprite is not rendered. The entity still exists in <see cref="All"/>
+        /// so the DM can target it via REVEAL_ENTITY / KILL_ENTITY tools, and saves persist
+        /// the flag so reloads keep concealment intact.
+        /// </summary>
+        public bool IsHidden
+        {
+            get => _isHidden;
+            set
+            {
+                _isHidden = value;
+                if (_sr != null) _sr.enabled = !value;
+            }
+        }
 
         private void Awake()     => All.Add(this);
         private void OnDestroy() => All.Remove(this);
@@ -29,7 +45,7 @@ namespace DNDLLM.Map
         }
 
         public void Initialize(Texture2D tex, string name, int x, int y,
-                               int hp, int ac, bool isEnemy)
+                               int hp, int ac, bool isEnemy, bool isHidden = false)
         {
             EntityName = name;
             HP = MaxHP = hp;
@@ -51,6 +67,9 @@ namespace DNDLLM.Map
                     new Vector2(0.5f, 0.5f),
                     ppu);
             }
+
+            // Apply concealment last — needs _sr already wired up
+            IsHidden = isHidden;
 
             PlaceAt(x, y);
         }

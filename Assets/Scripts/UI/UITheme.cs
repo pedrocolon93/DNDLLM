@@ -19,11 +19,11 @@ namespace DnD.UI
         public static readonly Color32 InputText     = new Color32(0xE8, 0xD0, 0xA0, 0xFF);
         public static readonly Color32 PlaceholderText = new Color32(0x6B, 0x50, 0x30, 0xFF);
 
-        // Font sizes
+        // Font sizes — kept compact to match the dense chat layout
         public const float FontHeader  = 13f;
-        public const float FontDM      = 16f;
-        public const float FontPlayer  = 16f;
-        public const float FontSystem  = 13f;
-        public const float FontInput   = 15f;
+        public const float FontDM      = 13f;
+        public const float FontPlayer  = 13f;
+        public const float FontSystem  = 11f;
+        public const float FontInput   = 13f;
     }
 }
