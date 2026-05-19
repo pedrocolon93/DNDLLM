@@ -97,6 +97,90 @@ Always maintain the tone and setting established in the campaign.";
         }
 
         /// <summary>
+        /// Generate a structured CampaignPlan via the configured LLMService. Asks the model for JSON
+        /// matching the plan schema; on parse failure (or no LLMService) returns a sensible fallback.
+        /// </summary>
+        public async Task<CampaignPlan> GenerateCampaignPlanAsync(string seed, CampaignSize size, int partyLevel)
+        {
+            using var _busy = DNDLLM.Services.BusyIndicator.Show($"Building {DnD.AI.CampaignSizeInfo.Label(size)} campaign…");
+
+            var svc = DNDLLM.Services.LLMService.Instance;
+            if (svc == null)
+            {
+                Debug.LogWarning("[DungeonMaster] No LLMService — falling back to local plan.");
+                return CampaignPlan.Fallback(seed, size);
+            }
+
+            int beatCount    = DnD.AI.CampaignSizeInfo.BeatCount(size);
+            int featureCount = DnD.AI.CampaignSizeInfo.FeatureCount(size);
+            int mapDim       = DnD.AI.CampaignSizeInfo.MapDim(size);
+
+            string sys =
+                "You are a D&D 5e campaign architect. Output ONLY valid JSON matching the requested schema. " +
+                "No prose, no markdown fences, no commentary.";
+            string usr =
+                $"Design a {DnD.AI.CampaignSizeInfo.Label(size)} D&D campaign for a party of level {partyLevel} " +
+                $"based on this seed:\n\"{seed}\"\n\n" +
+                $"The starting area must fit on a {mapDim}x{mapDim} tile map.\n" +
+                $"List exactly {beatCount} story beats and exactly {featureCount} keyLocations.\n\n" +
+                "JSON shape (use these exact field names):\n" +
+                "{\n" +
+                "  \"hook\": \"one-sentence opening situation\",\n" +
+                "  \"startingArea\": \"name of the first map area\",\n" +
+                $"  \"beats\": [ \"beat 1\", \"...\" ],   // exactly {beatCount} items\n" +
+                "  \"climax\": \"final confrontation in one sentence\",\n" +
+                "  \"resolution\": \"how the story can end\",\n" +
+                $"  \"keyLocations\": [ \"feature noun\", \"...\" ],   // {featureCount} short nouns like tavern, monastery, well, armory\n" +
+                "  \"keyNPCs\": [ \"name — short role\", \"...\" ]\n" +
+                "}";
+
+            string raw = "";
+            try { raw = await svc.SendPrompt(sys, usr); }
+            catch (Exception e) { Debug.LogWarning($"[DungeonMaster] Plan request failed: {e.Message}"); }
+
+            CampaignPlan plan = TryParsePlanJson(raw);
+            if (plan == null)
+            {
+                Debug.LogWarning($"[DungeonMaster] Plan parse failed — raw response was:\n{raw}");
+                plan = CampaignPlan.Fallback(seed, size);
+            }
+
+            plan.seed = seed ?? "";
+            plan.Size = size;
+            if (plan.beats == null) plan.beats = new List<string>();
+            if (plan.keyLocations == null) plan.keyLocations = new List<string>();
+            if (plan.keyNPCs == null) plan.keyNPCs = new List<string>();
+            plan.timelineText = plan.ToReadableText();
+
+            conversationHistory.Add($"Campaign seed: {seed}");
+            conversationHistory.Add($"Campaign plan: {plan.timelineText}");
+
+            return plan;
+        }
+
+        /// <summary>Strip optional ```json fences and parse via JsonUtility. Returns null on failure.</summary>
+        private static CampaignPlan TryParsePlanJson(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            string s = raw.Trim();
+            if (s.StartsWith("```"))
+            {
+                int nl = s.IndexOf('\n');
+                if (nl >= 0) s = s.Substring(nl + 1);
+                int fence = s.LastIndexOf("```");
+                if (fence >= 0) s = s.Substring(0, fence);
+                s = s.Trim();
+            }
+            // Locate the outermost { ... } in case the model wrapped extra text.
+            int open  = s.IndexOf('{');
+            int close = s.LastIndexOf('}');
+            if (open < 0 || close <= open) return null;
+            s = s.Substring(open, close - open + 1);
+            try { return JsonUtility.FromJson<CampaignPlan>(s); }
+            catch (Exception e) { Debug.LogWarning($"[DungeonMaster] Plan JSON parse exception: {e.Message}"); return null; }
+        }
+
+        /// <summary>
         /// Generate initial story timeline from player's campaign prompt
         /// </summary>
         public async Task<StoryTimeline> GenerateCampaignAsync(string campaignPrompt, int partyLevel)
