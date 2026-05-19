@@ -93,10 +93,12 @@ namespace DnD.Combat
                     yield break;
                 }
 
-                if (playerCharacters.All(p => p.currentHitPoints <= 0))
+                // 5e: party is lost only when every member is dead (failed all death saves).
+                // Unconscious-but-not-dead characters can still be revived by allies.
+                if (playerCharacters.All(p => p.isDead || (p.currentHitPoints <= 0 && p.deathSaveFailures >= 3)))
                 {
                     currentState = BattleState.BattleLost;
-                    OnCombatMessage?.Invoke("Defeat! All party members are unconscious!");
+                    OnCombatMessage?.Invoke("Defeat! The party has fallen.");
                     EndCombat(false);
                     yield break;
                 }
@@ -176,12 +178,22 @@ namespace DnD.Combat
             var currentCombatant = initiativeOrder[currentTurnIndex];
             var character = currentCombatant.character;
 
+            bool isPlayerCombatant = playerCharacters.Contains(character);
+
             if (character.currentHitPoints <= 0)
             {
-                yield break; // Skip turn if unconscious
+                // Player characters at 0HP roll death saves each turn (D&D 5e).
+                // Enemies just die when downed — no save mechanic for them.
+                if (isPlayerCombatant && !character.isDead && !character.isStable)
+                {
+                    var (_, msg) = character.RollDeathSave();
+                    OnCombatMessage?.Invoke(msg);
+                    if (character.isDead) OnCombatMessage?.Invoke($"{character.characterName} has died.");
+                }
+                yield break;
             }
 
-            bool isPlayer = playerCharacters.Contains(character);
+            bool isPlayer = isPlayerCombatant;
             currentState = isPlayer ? BattleState.PlayerTurn : BattleState.EnemyTurn;
 
             OnCombatMessage?.Invoke($"--- {character.characterName}'s Turn ---");
