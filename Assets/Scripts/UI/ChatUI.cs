@@ -58,8 +58,12 @@ namespace DnD.UI
 
         // ── Public API ────────────────────────────────────────────────
 
-        public void AddPlayerMessage(string message)  => AddMessage(message, MessageType.Player);
-        public void AddSystemMessage(string message)  => AddMessage(message, MessageType.System);
+        /// <summary>Fired whenever a message is appended to the chat. (type, text). Used by
+        /// GameManager to mirror chat into CampaignArchive.history.jsonl.</summary>
+        public event System.Action<string, string> OnMessageAdded;
+
+        public void AddPlayerMessage(string message)  { AddMessage(message, MessageType.Player); OnMessageAdded?.Invoke("Player", message); }
+        public void AddSystemMessage(string message)  { AddMessage(message, MessageType.System); OnMessageAdded?.Invoke("System", message); }
 
         public void AddDMMessage(string message, bool useTypewriter = false)
         {
@@ -72,6 +76,7 @@ namespace DnD.UI
             {
                 AddMessage(message, MessageType.DM);
             }
+            OnMessageAdded?.Invoke("DM", message);
         }
 
         public void AppendToDMMessage(string token)

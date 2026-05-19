@@ -131,6 +131,16 @@ namespace DNDLLM.Services
                 }
         }
 
+        /// <summary>Append a single chat message to history.jsonl without rewriting the full file.
+        /// Cheaper than the rewrite-on-Save path for high-frequency chat.</summary>
+        public static void AppendHistory(int slotIndex, ChatMessageData msg)
+        {
+            if (msg == null) return;
+            Directory.CreateDirectory(SlotDir(slotIndex));
+            // Newline-delimited JSON: one message per line. File.AppendAllText opens, writes, closes.
+            File.AppendAllText(HistoryPath(slotIndex), JsonUtility.ToJson(msg) + "\n");
+        }
+
         public static void SavePlayerImage(int slotIndex, int playerIndex, Texture2D tex, bool isToken)
         {
             if (tex == null) return;

@@ -131,7 +131,10 @@ namespace DnD.Managers
                 _initStatus = ChatUI.Instance != null ? "ChatUI found" : "ChatUI MISSING";
 
                 if (ChatUI.Instance != null)
-                    ChatUI.Instance.OnPlayerInput += HandlePlayerInput;
+                {
+                    ChatUI.Instance.OnPlayerInput  += HandlePlayerInput;
+                    ChatUI.Instance.OnMessageAdded += AppendChatToArchive;
+                }
 
                 if (menuButton != null)
                     menuButton.onClick.AddListener(OnMenuButtonPressed);
@@ -1709,6 +1712,22 @@ namespace DnD.Managers
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.AddSystemMessage(message);
+            }
+        }
+
+        /// <summary>Mirrors every chat message into the active slot's history.jsonl.
+        /// Cheap append — the rewrite-on-Save path still runs as a backstop.</summary>
+        private void AppendChatToArchive(string type, string text)
+        {
+            if (string.IsNullOrEmpty(type)) return;
+            try
+            {
+                DNDLLM.Services.CampaignArchive.AppendHistory(_currentSlotIndex,
+                    new DnD.Data.ChatMessageData { type = type, text = text ?? "" });
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[GameManager] AppendHistory failed: {e.Message}");
             }
         }
 
