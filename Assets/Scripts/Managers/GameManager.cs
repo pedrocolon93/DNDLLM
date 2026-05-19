@@ -48,7 +48,8 @@ namespace DnD.Managers
         public readonly DnD.Core.TurnQueue Turns = new DnD.Core.TurnQueue();
 
         [Header("AI Configuration")]
-        [SerializeField] private bool useMockLLM = true; // Set to false when using real LLM
+        [Tooltip("Use the in-process MockLLMProvider instead of the real LLMService (for offline development).")]
+        [SerializeField] private bool useMockLLM = false;
 
         [Header("UI — set by UISceneBuilder")]
         [SerializeField] private DnD.UI.TitleScreen             titleScreen;
@@ -266,18 +267,8 @@ namespace DnD.Managers
         {
             Debug.Log("[GameManager] Initializing systems...");
 
-            // Initialize LLM Provider
-            if (useMockLLM)
-            {
-                llmProvider = new MockLLMProvider();
-            }
-            else
-            {
-                // TODO: Initialize real LLM provider (LLMUnity, OpenAI, etc.)
-                // Example: llmProvider = new LLMUnityProvider();
-                llmProvider = new MockLLMProvider();
-            }
-
+            // Initialize LLM Provider — real LLMService when available, otherwise mock.
+            llmProvider = useMockLLM ? (ILLMProvider)new MockLLMProvider() : new LLMServiceProvider();
             await llmProvider.InitializeAsync();
 
             // Initialize Dungeon Master
