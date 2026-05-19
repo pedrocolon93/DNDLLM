@@ -471,6 +471,7 @@ namespace DnD.Managers
         private void OnSlotDeleted(int slotIndex)
         {
             DNDLLM.Services.SaveSystem.Delete(slotIndex);
+            DNDLLM.Services.CampaignArchive.Delete(slotIndex);
             titleScreen.Refresh();
         }
 
@@ -713,6 +714,10 @@ namespace DnD.Managers
             DNDLLM.Services.SaveSystem.Save(
                 _currentSlotIndex, saveData,
                 savePortrait, _characterMapToken, savedMapBackground, entitySprites);
+            // Mirror into the inspectable folder-per-slot CampaignArchive.
+            DNDLLM.Services.CampaignArchive.Save(
+                _currentSlotIndex, saveData, _currentPlan, saveData.messages,
+                savePortrait, _characterMapToken, savedMapBackground, entitySprites);
             // Per-player image files are written for index ≥ 1; index 0 already maps to
             // the legacy slot_{i}_portrait.png + slot_{i}_token.png written by Save above.
             for (int i = 1; i < playerCharacters.Count; i++)
@@ -729,15 +734,50 @@ namespace DnD.Managers
 
         private void LoadSlot(int slotIndex)
         {
-            var loaded = DNDLLM.Services.SaveSystem.Load(slotIndex);
-            if (loaded == null || loaded.Data == null)
-            {
-                Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
-                ChangeState(GameState.MainMenu);
-                return;
-            }
+            // Prefer the structured CampaignArchive when present; fall back to flat SaveSystem.
+            DnD.Data.SaveData             data       = null;
+            UnityEngine.Texture2D         portrait   = null;
+            UnityEngine.Texture2D         mapToken   = null;
+            UnityEngine.Texture2D         mapBg      = null;
+            List<UnityEngine.Texture2D>   entSprites = null;
+            DnD.AI.CampaignPlan           archivePlan = null;
 
-            var data = loaded.Data;
+            if (DNDLLM.Services.CampaignArchive.Exists(slotIndex))
+            {
+                var arc = DNDLLM.Services.CampaignArchive.Load(slotIndex);
+                if (arc != null && arc.Data != null)
+                {
+                    data        = arc.Data;
+                    portrait    = arc.Portrait;
+                    mapToken    = arc.MapToken;
+                    mapBg       = arc.MapBackground;
+                    entSprites  = arc.EntitySprites;
+                    archivePlan = arc.Plan;
+                }
+            }
+            if (data == null)
+            {
+                var loaded = DNDLLM.Services.SaveSystem.Load(slotIndex);
+                if (loaded == null || loaded.Data == null)
+                {
+                    Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
+                    ChangeState(GameState.MainMenu);
+                    return;
+                }
+                data        = loaded.Data;
+                portrait    = loaded.Portrait;
+                mapToken    = loaded.MapToken;
+                mapBg       = loaded.MapBackground;
+                entSprites  = loaded.EntitySprites;
+            }
+            // shadow the old "loaded.*" accessors below
+            var loadedShim = new DNDLLM.Services.SlotLoadResult
+            {
+                Data = data, Portrait = portrait, MapToken = mapToken,
+                MapBackground = mapBg, EntitySprites = entSprites ?? new List<UnityEngine.Texture2D>(),
+            };
+            // Keep the local variable name 'loaded' that the rest of the method already uses.
+            var loaded = loadedShim;
 
             // Clear any entities and world graph from a previous session
             MapEntityController.ClearAll();
@@ -834,9 +874,10 @@ namespace DnD.Managers
                     timelineText   = data.campaignTimeline
                 };
 
-            // Restore structured campaign plan if present (new saves). Old saves skip this block.
-            _currentPlan = null;
-            if (!string.IsNullOrEmpty(data.campaignPlanJson))
+            // Restore structured campaign plan. Prefer the archive's plan (if loaded),
+            // then the embedded JSON on the SaveData, then the size hint, then nothing.
+            _currentPlan = archivePlan;
+            if (_currentPlan == null && !string.IsNullOrEmpty(data.campaignPlanJson))
             {
                 try { _currentPlan = UnityEngine.JsonUtility.FromJson<CampaignPlan>(data.campaignPlanJson); }
                 catch (System.Exception e) { Debug.LogWarning($"[GameManager] CampaignPlan parse failed: {e.Message}"); }
