@@ -178,7 +178,12 @@ namespace DNDLLM.Services
                     Debug.Log($"[LLMService] Chat response: {request.downloadHandler.text}");
                     var responseData = JsonUtility.FromJson<OpenRouterResponse>(request.downloadHandler.text);
                     if (responseData?.choices?.Count > 0)
-                        return responseData.choices[0].message.content;
+                    {
+                        // qwen and similar reasoning models occasionally prefix their answer with a
+                        // double-newline; trim so the chat doesn't render leading blank lines.
+                        var msg = responseData.choices[0].message;
+                        return msg?.content == null ? "" : msg.content.Trim();
+                    }
                 }
                 else
                 {
@@ -874,7 +879,7 @@ namespace DNDLLM.Services
                         });
                     }
                 }
-                result.Text = msg.content;
+                result.Text = msg.content == null ? "" : msg.content.Trim();
             }
             catch (System.Exception e)
             {
