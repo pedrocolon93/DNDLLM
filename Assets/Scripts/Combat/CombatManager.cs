@@ -208,26 +208,50 @@ namespace DnD.Combat
         {
             yield return new WaitForSeconds(0.5f);
 
-            // Simple AI: attack random player
+            // Preferred: route through the DM tool loop with the enemy as actor.
+            // The LLM can choose a target, narrate, and call DAMAGE/MOVE/etc. just like
+            // the player's turn. If the DM is unavailable, fall back to the dice formula.
+            if (DungeonMaster.Instance != null)
+            {
+                yield return ExecuteEnemyTurnViaDM(enemy);
+                yield break;
+            }
+
+            // Fallback: simple AI — attack a random alive player using the dice formula.
             var alivePlayerTargets = playerCharacters.Where(p => p.currentHitPoints > 0).ToList();
             if (alivePlayerTargets.Count > 0)
             {
                 var target = alivePlayerTargets[Random.Range(0, alivePlayerTargets.Count)];
                 lastAttackSummary = "";
                 ExecuteAttack(enemy, target);
-
-                // Hand the mechanical summary off to the DM for in-character narration.
-                // Fire-and-forget — combat flow continues regardless of the LLM's latency.
-                if (DungeonMaster.Instance != null && !string.IsNullOrEmpty(lastAttackSummary))
-                {
-                    string summary = lastAttackSummary;
-                    string actor = enemy.characterName;
-                    string victim = target.characterName;
-                    _ = DungeonMaster.Instance.NarrateActionAsync(
-                        $"In combat: {actor} attacked {victim}. {summary}",
-                        "Combat narration — describe what just happened in 1-2 vivid sentences.");
-                }
             }
+        }
+
+        /// <summary>Wraps DungeonMaster.RunPlayerTurnAsync to let the LLM drive the enemy.
+        /// Coroutine wrapper because StartCoroutine can't yield a Task directly.</summary>
+        private IEnumerator ExecuteEnemyTurnViaDM(CharacterStats enemy)
+        {
+            var alive = playerCharacters.Where(p => p != null && p.currentHitPoints > 0)
+                                        .Select(p => p.characterName).ToList();
+            string targets = alive.Count > 0 ? string.Join(", ", alive) : "no one";
+
+            string action  = $"It is the enemy's turn. The {enemy.characterName} acts now " +
+                             $"(HP {enemy.currentHitPoints}/{enemy.maxHitPoints}, AC {enemy.armorClass}). " +
+                             $"Possible targets: {targets}. Take exactly one short hostile action — call DAMAGE " +
+                             $"on a target, then end with a 1-2 sentence narration. Do NOT call MOVE for the player.";
+            string ctx     = "Combat — DM controls the enemy. Call exactly one DAMAGE or condition tool, then narrate.";
+            var    runTask = DungeonMaster.Instance.RunPlayerTurnAsync(action, ctx, enemy, maxToolSteps: 4);
+
+            // Yield until the task completes — coroutine bridge.
+            while (!runTask.IsCompleted) yield return null;
+            string narration = "";
+            try { narration = runTask.Result ?? ""; }
+            catch (System.Exception e) { Debug.LogWarning($"[CombatManager] DM enemy turn failed: {e.Message}"); }
+
+            // Narration already lands in the chat via DungeonMaster.OnDMResponse.
+            // We only mirror a compact combat message for the OnCombatMessage subscribers.
+            if (!string.IsNullOrEmpty(narration))
+                OnCombatMessage?.Invoke($"{enemy.characterName} acts.");
         }
 
         public void ExecuteAttack(CharacterStats attacker, CharacterStats target, int weaponDamage = 4, int weaponDamageDie = 6)
