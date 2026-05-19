@@ -1345,7 +1345,29 @@ public static class UISceneBuilder
         // Multiline input
         var input = MakeInputField(panelGO.transform,
             "A haunted forest where a forgotten god stirs...", true);
-        input.GetComponent<LayoutElement>().minHeight = 120;
+        input.GetComponent<LayoutElement>().minHeight = 100;
+
+        // Size selector row (Small / Medium / Large) + readout
+        var sizeRowGO = MakeGO("SizeRow", panelGO.transform);
+        sizeRowGO.AddComponent<LayoutElement>().preferredHeight = 34;
+        var sizeHLG = sizeRowGO.AddComponent<HorizontalLayoutGroup>();
+        sizeHLG.spacing                = 8;
+        sizeHLG.childForceExpandWidth  = true;
+        sizeHLG.childForceExpandHeight = true;
+        sizeHLG.childControlWidth      = true;
+        sizeHLG.childControlHeight     = true;
+
+        var smallBtn  = MenuMakeButton(sizeRowGO.transform, "SMALL · 5×5",  UITheme.SystemText, 34);
+        var mediumBtn = MenuMakeButton(sizeRowGO.transform, "MEDIUM · 7×7", UITheme.SystemText, 34);
+        var largeBtn  = MenuMakeButton(sizeRowGO.transform, "LARGE · 9×9",  UITheme.SystemText, 34);
+
+        var sizeLabelGO = MakeGO("SizeLabel", panelGO.transform);
+        sizeLabelGO.AddComponent<LayoutElement>().preferredHeight = 16;
+        var sizeLabel = sizeLabelGO.AddComponent<TextMeshProUGUI>();
+        sizeLabel.text      = "Medium (7×7)";
+        sizeLabel.fontSize  = 11f;
+        sizeLabel.color     = UITheme.SystemText;
+        sizeLabel.alignment = TextAlignmentOptions.Center;
 
         // Button row
         var rowGO = MakeGO("ButtonRow", panelGO.transform);
@@ -1362,10 +1384,17 @@ public static class UISceneBuilder
 
         // Wire serialized fields
         var so = new SerializedObject(popup);
-        SetProp(so, "promptInput",  input);
-        SetProp(so, "beginButton",  beginBtn);
-        SetProp(so, "cancelButton", cancelBtn);
+        SetProp(so, "promptInput",   input);
+        SetProp(so, "beginButton",   beginBtn);
+        SetProp(so, "cancelButton",  cancelBtn);
+        SetProp(so, "smallButton",   smallBtn);
+        SetProp(so, "mediumButton",  mediumBtn);
+        SetProp(so, "largeButton",   largeBtn);
+        SetProp(so, "sizeLabel",     sizeLabel);
         so.ApplyModifiedProperties();
+
+        // Resize the popup panel to fit the new size row
+        panelRT.sizeDelta = new Vector2(520, 400);
 
         // Wire onto GameManager
         var gm = Object.FindAnyObjectByType<DnD.Managers.GameManager>();

@@ -82,8 +82,25 @@ namespace DnD.Character
             return modifier;
         }
 
+        // ── Death-saving-throws (D&D 5e) ─────────────────────────────────
+        // Three successes → Stable (still 0HP, unconscious). Three failures → Dead.
+        // A nat-20 immediately wakes the character with 1HP. A nat-1 counts as two
+        // failures. Damage while dying adds a failure (two on a critical hit).
+        public int deathSaveSuccesses;
+        public int deathSaveFailures;
+        public bool isStable;   // succeeded all three saves
+        public bool isDead;     // failed all three saves
+
         public void TakeDamage(int damage)
         {
+            // 5e: if the character is already at 0HP (dying), incoming damage adds
+            // a failed death save instead of dropping below 0.
+            if (currentHitPoints <= 0 && HasCondition(Condition.Unconscious) && !isDead)
+            {
+                AddDeathSaveFailure();
+                return;
+            }
+
             // Temporary HP absorbs damage first
             if (temporaryHitPoints > 0)
             {
@@ -95,18 +112,72 @@ namespace DnD.Character
             currentHitPoints -= damage;
             currentHitPoints = Mathf.Max(0, currentHitPoints);
 
-            if (currentHitPoints == 0)
+            if (currentHitPoints == 0 && !isDead)
             {
                 AddCondition(Condition.Unconscious, -1); // -1 = indefinite
+                isStable = false;                          // newly dropped — reset stability
             }
         }
 
         public void Heal(int healing)
         {
-            if (!HasCondition(Condition.Unconscious))
+            // 5e: any healing > 0 revives a dying character. Stable characters also
+            // wake (but at the rolled HP, not zero). Death overrides healing.
+            if (isDead) return;
+            currentHitPoints = Mathf.Min(currentHitPoints + healing, maxHitPoints);
+            if (currentHitPoints > 0)
             {
-                currentHitPoints = Mathf.Min(currentHitPoints + healing, maxHitPoints);
+                deathSaveSuccesses = 0;
+                deathSaveFailures  = 0;
+                isStable           = false;
+                RemoveCondition(Condition.Unconscious);
             }
+        }
+
+        /// <summary>Roll a death save. Returns (rolled value, outcome message). Caller
+        /// is responsible for displaying the outcome.</summary>
+        public (int roll, string outcome) RollDeathSave()
+        {
+            if (isDead)        return (0, $"{characterName} is already dead.");
+            if (isStable)      return (0, $"{characterName} is stable.");
+            if (currentHitPoints > 0) return (0, $"{characterName} doesn't need to roll death saves.");
+
+            int roll = DnD.Core.DiceRoller.D20Roll();
+            if (roll == 20)
+            {
+                // Critical success — regain 1HP, wake up.
+                currentHitPoints = 1;
+                deathSaveSuccesses = 0;
+                deathSaveFailures  = 0;
+                isStable = false;
+                RemoveCondition(Condition.Unconscious);
+                return (roll, $"{characterName} rolls a NATURAL 20 — regains consciousness at 1 HP!");
+            }
+            if (roll == 1)
+            {
+                AddDeathSaveFailure();
+                AddDeathSaveFailure();
+                return (roll, $"{characterName} rolls a 1 — two failed death saves! ({deathSaveFailures}/3)");
+            }
+            if (roll >= 10)
+            {
+                AddDeathSaveSuccess();
+                return (roll, $"{characterName} succeeds on a death save. ({deathSaveSuccesses}/3)");
+            }
+            AddDeathSaveFailure();
+            return (roll, $"{characterName} fails a death save. ({deathSaveFailures}/3)");
+        }
+
+        private void AddDeathSaveSuccess()
+        {
+            deathSaveSuccesses = Mathf.Min(3, deathSaveSuccesses + 1);
+            if (deathSaveSuccesses >= 3) isStable = true;
+        }
+
+        private void AddDeathSaveFailure()
+        {
+            deathSaveFailures = Mathf.Min(3, deathSaveFailures + 1);
+            if (deathSaveFailures >= 3) isDead = true;
         }
 
         public void AddCondition(Condition condition, int duration)

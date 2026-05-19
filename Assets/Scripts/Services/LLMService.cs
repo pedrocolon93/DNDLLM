@@ -7,15 +7,19 @@ using DnD.AI;
 
 namespace DNDLLM.Services
 {
-    public enum LLMProvider { OpenRouter, Ollama }
+    public enum LLMProvider { OpenRouter, Ollama, Local }
 
     public class LLMService : MonoBehaviour
     {
         public static LLMService Instance { get; private set; }
 
         [Header("Provider")]
-        [SerializeField] private LLMProvider provider = LLMProvider.OpenRouter;
+        [SerializeField] private LLMProvider provider = LLMProvider.Local;
         [SerializeField] private bool useMock = false;
+
+        [Header("Debug sprites (skip remote image generation)")]
+        [Tooltip("When ON: every image-generation call returns a procedural colored shape via DebugSpriteFactory. Default ON for fast iteration.")]
+        public bool useDebugSprites = true;
 
         [Header("OpenRouter")]
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
@@ -26,6 +30,11 @@ namespace DNDLLM.Services
         [Header("Ollama  (text only — images still use OpenRouter)")]
         [SerializeField] private string ollamaBaseUrl = "http://localhost:11434";
         [SerializeField] private string ollamaModel = "llama3.2";
+
+        [Header("Local OpenAI-compatible (e.g. osaurus on 127.0.0.1:1337)")]
+        [SerializeField] private string localBaseUrl = "http://127.0.0.1:1337";
+        [SerializeField] private string localApiKey  = "";
+        [SerializeField] private string localModel   = "qwen3.6-35b-a3b-mxfp4";
 
         [Header("Cache")]
         [SerializeField] private bool useCache = true;
@@ -126,6 +135,12 @@ namespace DNDLLM.Services
                 string url = $"{ollamaBaseUrl.TrimEnd('/')}/v1/chat/completions";
                 return await SendChatCompletionAsync(url, ollamaModel, messages, authToken: null);
             }
+            else if (provider == LLMProvider.Local)
+            {
+                string url = $"{localBaseUrl.TrimEnd('/')}/v1/chat/completions";
+                return await SendChatCompletionAsync(url, localModel, messages,
+                    authToken: string.IsNullOrEmpty(localApiKey) ? null : localApiKey);
+            }
             else
             {
                 return await SendChatCompletionAsync(
@@ -163,7 +178,12 @@ namespace DNDLLM.Services
                     Debug.Log($"[LLMService] Chat response: {request.downloadHandler.text}");
                     var responseData = JsonUtility.FromJson<OpenRouterResponse>(request.downloadHandler.text);
                     if (responseData?.choices?.Count > 0)
-                        return responseData.choices[0].message.content;
+                    {
+                        // qwen and similar reasoning models occasionally prefix their answer with a
+                        // double-newline; trim so the chat doesn't render leading blank lines.
+                        var msg = responseData.choices[0].message;
+                        return msg?.content == null ? "" : msg.content.Trim();
+                    }
                 }
                 else
                 {
@@ -176,6 +196,11 @@ namespace DNDLLM.Services
 
         public async Task<Texture2D> GenerateImage(string prompt)
         {
+            if (useDebugSprites)
+            {
+                await Task.Yield();
+                return DNDLLM.Utils.DebugSpriteFactory.MakeTile(prompt, prompt, 128);
+            }
             if (useCache)
             {
                 Texture2D cachedTex = ImageCache.Load(prompt);
@@ -314,6 +339,11 @@ namespace DNDLLM.Services
         /// </summary>
         public async Task<Texture2D> GenerateStyledTile(string tilePrompt, Texture2D styleAnchor)
         {
+            if (useDebugSprites)
+            {
+                await Task.Yield();
+                return DNDLLM.Utils.DebugSpriteFactory.MakeTile(tilePrompt, tilePrompt, 64);
+            }
             if (useCache)
             {
                 Texture2D cachedTex = ImageCache.Load(tilePrompt);
@@ -438,6 +468,12 @@ namespace DNDLLM.Services
                 url = $"{ollamaBaseUrl.TrimEnd('/')}/v1/chat/completions";
                 modelName = ollamaModel;
                 authToken = null;
+            }
+            else if (provider == LLMProvider.Local)
+            {
+                url = $"{localBaseUrl.TrimEnd('/')}/v1/chat/completions";
+                modelName = localModel;
+                authToken = string.IsNullOrEmpty(localApiKey) ? null : localApiKey;
             }
             else
             {
@@ -578,9 +614,25 @@ namespace DNDLLM.Services
         /// Asks the LLM to distribute story elements across an NxN logical grid.
         /// Returns a LogicalGrid with terrain_type/feature/description per cell.
         /// </summary>
-        public async Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story)
+        public Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story)
+            => GenerateLogicalGridAsync(size, story, null);
+
+        public async Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story,
+            System.Collections.Generic.IList<string> requiredFeatures)
         {
             string sys = "You are a DND map architect. You output ONLY valid JSON matching the requested schema — no prose, no markdown fences.";
+            string requiredLine = "";
+            if (requiredFeatures != null && requiredFeatures.Count > 0)
+            {
+                var sb = new StringBuilder("- You MUST place each of these features on at least one tile (each one at most once): ");
+                for (int i = 0; i < requiredFeatures.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(requiredFeatures[i]);
+                }
+                sb.Append('.');
+                requiredLine = sb.ToString() + "\n";
+            }
             string usr =
                 $"Create a logical {size}x{size} grid for this story:\n{story}\n\n" +
                 $"Distribute the major elements (buildings, terrain changes, points of interest) across tiles logically. " +
@@ -591,7 +643,8 @@ namespace DNDLLM.Services
                 $"- Include EVERY cell from (0,0) to ({size-1},{size-1}). That is exactly {size*size} tiles.\n" +
                 $"- terrain_type is one short keyword: grass, dirt, stone, water, sand, wood, cobble, wall, cliff, void.\n" +
                 $"- feature is a short noun (tavern, monastery, armory, well, statue, tree, ...) or empty string if none.\n" +
-                $"- description is one short sentence for the image generator.";
+                $"- description is one short sentence for the image generator.\n" +
+                requiredLine;
             string raw = await SendPrompt(sys, usr);
             if (string.IsNullOrEmpty(raw)) return null;
 
@@ -626,6 +679,11 @@ namespace DNDLLM.Services
             if (grid == null || grid.tiles == null || grid.tiles.Count == 0) return null;
 
             int size = grid.size;
+            if (useDebugSprites)
+            {
+                await Task.Yield();
+                return RenderLogicalGridAsTexture(grid, 64);
+            }
             var sb = new StringBuilder(2048);
             if (gridMode)
             {
@@ -674,8 +732,44 @@ namespace DNDLLM.Services
         /// Sends a rendered map image to a vision-capable LLM and asks for a short revision instruction
         /// (or "PERFECT" if no fixes are needed). Returns the raw instruction text.
         /// </summary>
+        /// <summary>Renders a LogicalGrid as a procedurally-coloured composite Texture2D for debug mode.</summary>
+        private Texture2D RenderLogicalGridAsTexture(DNDLLM.Map.LogicalGrid grid, int cellPx)
+        {
+            int size = grid.size;
+            int dim = size * cellPx;
+            var tex = new Texture2D(dim, dim, TextureFormat.RGBA32, false);
+            var fill = DNDLLM.Utils.DebugSpriteFactory.ColorForTerrain("stone");
+            var px = new Color[dim * dim];
+            for (int i = 0; i < px.Length; i++) px[i] = fill;
+            tex.SetPixels(px);
+            foreach (var t in grid.tiles)
+            {
+                if (t == null) continue;
+                Color c = DNDLLM.Utils.DebugSpriteFactory.ColorForTerrain(t.terrain_type);
+                int gx = t.x * cellPx;
+                int gy = (size - 1 - t.y) * cellPx; // y inverted so (0,0) renders at top-left
+                for (int yy = 0; yy < cellPx; yy++)
+                for (int xx = 0; xx < cellPx; xx++) tex.SetPixel(gx + xx, gy + yy, c);
+                var (shape, col) = DNDLLM.Utils.DebugSpriteFactory.BadgeForFeature(t.feature);
+                if (shape != DNDLLM.Utils.DebugSpriteFactory.Shape.None)
+                    DNDLLM.Utils.DebugSpriteFactory.DrawShape(tex,
+                        gx + cellPx / 2, gy + cellPx / 2, cellPx / 3, shape, col);
+                // cell border
+                for (int i = 0; i < cellPx; i++)
+                {
+                    tex.SetPixel(gx + i, gy, Color.black);
+                    tex.SetPixel(gx + i, gy + cellPx - 1, Color.black);
+                    tex.SetPixel(gx, gy + i, Color.black);
+                    tex.SetPixel(gx + cellPx - 1, gy + i, Color.black);
+                }
+            }
+            tex.Apply();
+            return tex;
+        }
+
         public async Task<string> EvaluateMapImageAsync(Texture2D image, DNDLLM.Map.LogicalGrid grid)
         {
+            if (useDebugSprites) { await Task.Yield(); return "PERFECT"; }
             if (image == null) return "";
             byte[] png = image.EncodeToPNG();
             string b64 = System.Convert.ToBase64String(png);
@@ -742,6 +836,7 @@ namespace DNDLLM.Services
         /// </summary>
         public async Task<Texture2D> RefineMapImageAsync(Texture2D image, string feedback)
         {
+            if (useDebugSprites) { await Task.Yield(); return image; }
             if (image == null || string.IsNullOrEmpty(feedback)) return image;
 
             string instruction =
@@ -784,7 +879,7 @@ namespace DNDLLM.Services
                         });
                     }
                 }
-                result.Text = msg.content;
+                result.Text = msg.content == null ? "" : msg.content.Trim();
             }
             catch (System.Exception e)
             {

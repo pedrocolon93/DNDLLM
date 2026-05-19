@@ -25,7 +25,25 @@ namespace DNDLLM.Services
         public static SlotLoadResult Load(int slotIndex)
         {
             string jsonPath = SlotJsonPath(slotIndex);
-            if (!File.Exists(jsonPath)) return null;
+            if (!File.Exists(jsonPath))
+            {
+                // Flat layout missing — fall back to the new folder-per-slot CampaignArchive.
+                // This lets a user clear ./Saves/ and still recover from ./Campaigns/.
+                if (CampaignArchive.Exists(slotIndex))
+                {
+                    var arc = CampaignArchive.Load(slotIndex);
+                    if (arc == null || arc.Data == null) return null;
+                    return new SlotLoadResult
+                    {
+                        Data          = arc.Data,
+                        Portrait      = arc.Portrait,
+                        MapToken      = arc.MapToken,
+                        MapBackground = arc.MapBackground,
+                        EntitySprites = arc.EntitySprites ?? new List<Texture2D>(),
+                    };
+                }
+                return null;
+            }
 
             SaveData data;
             try

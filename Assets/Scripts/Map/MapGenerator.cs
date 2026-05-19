@@ -45,6 +45,13 @@ namespace DNDLLM.Map
         public string StartingContext { get; set; } = "";
 
         /// <summary>
+        /// Feature nouns (e.g. "tavern", "armory", "well") that the LLM must place on the
+        /// logical grid. Set by GameManager before generation from CampaignPlan.keyLocations.
+        /// Empty / null leaves the LLM free to invent its own.
+        /// </summary>
+        public System.Collections.Generic.List<string> KeyFeatures { get; set; }
+
+        /// <summary>
         /// Style description built once per map from the theme.
         /// Prepended to every tile prompt so DALL-E (which can't receive image references)
         /// stays on the same flat 2D top-down style across all tiles.
@@ -183,8 +190,8 @@ namespace DNDLLM.Map
             if (DnD.UI.ChatUI.Instance != null)
                 DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Planning {size}x{size} logical grid...");
 
-            // Phase 1 — logical grid via LLM
-            LogicalGrid logical = await LLMService.Instance.GenerateLogicalGridAsync(size, story);
+            // Phase 1 — logical grid via LLM (KeyFeatures from CampaignPlan, when set)
+            LogicalGrid logical = await LLMService.Instance.GenerateLogicalGridAsync(size, story, KeyFeatures);
             if (logical == null || logical.tiles == null || logical.tiles.Count == 0)
             {
                 Debug.LogError("[MapGenerator-D] Logical grid generation failed; falling back to per-tile generator.");

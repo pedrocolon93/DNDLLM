@@ -48,7 +48,8 @@ namespace DnD.Managers
         public readonly DnD.Core.TurnQueue Turns = new DnD.Core.TurnQueue();
 
         [Header("AI Configuration")]
-        [SerializeField] private bool useMockLLM = true; // Set to false when using real LLM
+        [Tooltip("Use the in-process MockLLMProvider instead of the real LLMService (for offline development).")]
+        [SerializeField] private bool useMockLLM = false;
 
         [Header("UI — set by UISceneBuilder")]
         [SerializeField] private DnD.UI.TitleScreen             titleScreen;
@@ -82,6 +83,29 @@ namespace DnD.Managers
         private CommandParser commandParser;
         private ILLMProvider llmProvider;
         private StoryTimeline currentCampaign;
+        // Structured plan emitted by DungeonMaster.GenerateCampaignPlanAsync — drives map size + features.
+        private CampaignPlan  _currentPlan;
+        private CampaignSize  _currentSize = CampaignSize.Medium;
+
+        public CampaignPlan CurrentPlan => _currentPlan;
+
+        /// <summary>NPC the player is currently in dialogue with (null when not in Dialogue state).</summary>
+        public string CurrentDialogueNpc { get; private set; }
+
+        /// <summary>Called by GMToolExecutor TALK_TO. Switches into Dialogue and pins the NPC name.</summary>
+        public void BeginDialogue(string npcName)
+        {
+            CurrentDialogueNpc = (npcName ?? "").Trim();
+            if (string.IsNullOrEmpty(CurrentDialogueNpc)) CurrentDialogueNpc = "stranger";
+            if (currentState != GameState.Dialogue) ChangeState(GameState.Dialogue);
+        }
+
+        /// <summary>Called by GMToolExecutor END_DIALOGUE. Returns to Exploration.</summary>
+        public void EndDialogue()
+        {
+            CurrentDialogueNpc = null;
+            if (currentState == GameState.Dialogue) ChangeState(GameState.Exploration);
+        }
 
         private void Awake()
         {
@@ -125,7 +149,10 @@ namespace DnD.Managers
                 _initStatus = ChatUI.Instance != null ? "ChatUI found" : "ChatUI MISSING";
 
                 if (ChatUI.Instance != null)
-                    ChatUI.Instance.OnPlayerInput += HandlePlayerInput;
+                {
+                    ChatUI.Instance.OnPlayerInput  += HandlePlayerInput;
+                    ChatUI.Instance.OnMessageAdded += AppendChatToArchive;
+                }
 
                 if (menuButton != null)
                     menuButton.onClick.AddListener(OnMenuButtonPressed);
@@ -261,18 +288,8 @@ namespace DnD.Managers
         {
             Debug.Log("[GameManager] Initializing systems...");
 
-            // Initialize LLM Provider
-            if (useMockLLM)
-            {
-                llmProvider = new MockLLMProvider();
-            }
-            else
-            {
-                // TODO: Initialize real LLM provider (LLMUnity, OpenAI, etc.)
-                // Example: llmProvider = new LLMUnityProvider();
-                llmProvider = new MockLLMProvider();
-            }
-
+            // Initialize LLM Provider — real LLMService when available, otherwise mock.
+            llmProvider = useMockLLM ? (ILLMProvider)new MockLLMProvider() : new LLMServiceProvider();
             await llmProvider.InitializeAsync();
 
             // Initialize Dungeon Master
@@ -411,8 +428,11 @@ namespace DnD.Managers
 
             if (adventurePromptPopup != null)
             {
-                adventurePromptPopup.OnSubmit = OnAdventurePromptSubmitted;
-                adventurePromptPopup.OnCancel = OnAdventurePromptCancelled;
+                // Prefer the size-aware callback; OnSubmit is the back-compat fallback
+                // (it still fires alongside OnSubmitWithSize, so leave it unset to avoid duplicate work).
+                adventurePromptPopup.OnSubmit          = null;
+                adventurePromptPopup.OnSubmitWithSize  = OnAdventurePromptSubmittedWithSize;
+                adventurePromptPopup.OnCancel          = OnAdventurePromptCancelled;
                 adventurePromptPopup.Open();
             }
             else if (ChatUI.Instance != null)
@@ -427,13 +447,25 @@ namespace DnD.Managers
 
         private async void OnAdventurePromptSubmitted(string prompt)
         {
+            // Back-compat path (no size info). Defaults to Medium.
             if (adventurePromptPopup != null) adventurePromptPopup.Close();
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.ClearChat();
                 ChatUI.Instance.AddSystemMessage("=== NEW ADVENTURE ===");
             }
-            await StartCampaignAsync(prompt);
+            await StartCampaignAsync(prompt, CampaignSize.Medium);
+        }
+
+        private async void OnAdventurePromptSubmittedWithSize(string prompt, CampaignSize size)
+        {
+            if (adventurePromptPopup != null) adventurePromptPopup.Close();
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.ClearChat();
+                ChatUI.Instance.AddSystemMessage($"=== NEW ADVENTURE — {CampaignSizeInfo.Label(size)} ===");
+            }
+            await StartCampaignAsync(prompt, size);
         }
 
         private void OnAdventurePromptCancelled()
@@ -451,6 +483,7 @@ namespace DnD.Managers
         private void OnSlotDeleted(int slotIndex)
         {
             DNDLLM.Services.SaveSystem.Delete(slotIndex);
+            DNDLLM.Services.CampaignArchive.Delete(slotIndex);
             titleScreen.Refresh();
         }
 
@@ -595,6 +628,8 @@ namespace DnD.Managers
                 cha                   = playerCharacter.abilities.GetScore(AbilityScore.Charisma),
                 campaignSeed          = _campaignSeed,
                 campaignTimeline      = currentCampaign?.timelineText ?? "",
+                campaignSizeName      = _currentPlan != null ? _currentPlan.sizeName : _currentSize.ToString(),
+                campaignPlanJson      = _currentPlan != null ? UnityEngine.JsonUtility.ToJson(_currentPlan) : "",
                 gameState             = currentState.ToString(),
                 messages              = ChatUI.Instance != null
                                             ? ChatUI.Instance.GetMessageHistory()
@@ -691,6 +726,10 @@ namespace DnD.Managers
             DNDLLM.Services.SaveSystem.Save(
                 _currentSlotIndex, saveData,
                 savePortrait, _characterMapToken, savedMapBackground, entitySprites);
+            // Mirror into the inspectable folder-per-slot CampaignArchive.
+            DNDLLM.Services.CampaignArchive.Save(
+                _currentSlotIndex, saveData, _currentPlan, saveData.messages,
+                savePortrait, _characterMapToken, savedMapBackground, entitySprites);
             // Per-player image files are written for index ≥ 1; index 0 already maps to
             // the legacy slot_{i}_portrait.png + slot_{i}_token.png written by Save above.
             for (int i = 1; i < playerCharacters.Count; i++)
@@ -707,15 +746,50 @@ namespace DnD.Managers
 
         private void LoadSlot(int slotIndex)
         {
-            var loaded = DNDLLM.Services.SaveSystem.Load(slotIndex);
-            if (loaded == null || loaded.Data == null)
-            {
-                Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
-                ChangeState(GameState.MainMenu);
-                return;
-            }
+            // Prefer the structured CampaignArchive when present; fall back to flat SaveSystem.
+            DnD.Data.SaveData             data       = null;
+            UnityEngine.Texture2D         portrait   = null;
+            UnityEngine.Texture2D         mapToken   = null;
+            UnityEngine.Texture2D         mapBg      = null;
+            List<UnityEngine.Texture2D>   entSprites = null;
+            DnD.AI.CampaignPlan           archivePlan = null;
 
-            var data = loaded.Data;
+            if (DNDLLM.Services.CampaignArchive.Exists(slotIndex))
+            {
+                var arc = DNDLLM.Services.CampaignArchive.Load(slotIndex);
+                if (arc != null && arc.Data != null)
+                {
+                    data        = arc.Data;
+                    portrait    = arc.Portrait;
+                    mapToken    = arc.MapToken;
+                    mapBg       = arc.MapBackground;
+                    entSprites  = arc.EntitySprites;
+                    archivePlan = arc.Plan;
+                }
+            }
+            if (data == null)
+            {
+                var loaded = DNDLLM.Services.SaveSystem.Load(slotIndex);
+                if (loaded == null || loaded.Data == null)
+                {
+                    Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
+                    ChangeState(GameState.MainMenu);
+                    return;
+                }
+                data        = loaded.Data;
+                portrait    = loaded.Portrait;
+                mapToken    = loaded.MapToken;
+                mapBg       = loaded.MapBackground;
+                entSprites  = loaded.EntitySprites;
+            }
+            // shadow the old "loaded.*" accessors below
+            var loadedShim = new DNDLLM.Services.SlotLoadResult
+            {
+                Data = data, Portrait = portrait, MapToken = mapToken,
+                MapBackground = mapBg, EntitySprites = entSprites ?? new List<UnityEngine.Texture2D>(),
+            };
+            // Keep the local variable name 'loaded' that the rest of the method already uses.
+            var loaded = loadedShim;
 
             // Clear any entities and world graph from a previous session
             MapEntityController.ClearAll();
@@ -812,6 +886,18 @@ namespace DnD.Managers
                     timelineText   = data.campaignTimeline
                 };
 
+            // Restore structured campaign plan. Prefer the archive's plan (if loaded),
+            // then the embedded JSON on the SaveData, then the size hint, then nothing.
+            _currentPlan = archivePlan;
+            if (_currentPlan == null && !string.IsNullOrEmpty(data.campaignPlanJson))
+            {
+                try { _currentPlan = UnityEngine.JsonUtility.FromJson<CampaignPlan>(data.campaignPlanJson); }
+                catch (System.Exception e) { Debug.LogWarning($"[GameManager] CampaignPlan parse failed: {e.Message}"); }
+            }
+            if (_currentPlan != null) _currentSize = _currentPlan.Size;
+            else if (System.Enum.TryParse<CampaignSize>(data.campaignSizeName ?? "", true, out var parsedSize))
+                _currentSize = parsedSize;
+
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.ClearChat();
@@ -888,6 +974,17 @@ namespace DnD.Managers
             MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
             // Skip LLM description generation when we have saved descriptions to restore
             MapGenerator.Instance.SkipDescriptionGeneration = _pendingTileDescriptions != null;
+
+            // Apply campaign size + plan features before generation. Only do this for a fresh
+            // campaign (no saved map) — reloads must use whatever dims the save expects.
+            if (_pendingMapBackground == null && _pendingTileGrid == null && _currentPlan != null)
+            {
+                int dim = _currentPlan.MapDim;
+                MapGenerator.Instance.width  = dim;
+                MapGenerator.Instance.height = dim;
+                MapGenerator.Instance.KeyFeatures = _currentPlan.keyLocations;
+                MapGenerator.Instance.StartingContext = _currentPlan.startingArea ?? "";
+            }
 
             // If LoadSlot left us a saved map background, skip the 30-60s LLM holistic-paint
             // pipeline entirely and rebuild the visible map from the cached PNG + saved tile grid.
@@ -1034,6 +1131,10 @@ namespace DnD.Managers
             using var _busy = charTex == null
                 ? DNDLLM.Services.BusyIndicator.Show("Generating character sprite…")
                 : null;
+
+            // Debug-sprite shortcut — skip LLM image generation entirely.
+            if (charTex == null && LLMService.Instance != null && LLMService.Instance.useDebugSprites)
+                charTex = DNDLLM.Utils.DebugSpriteFactory.MakeCharacterToken(64);
 
             // Generate a top-down character token styled to match the map's tiles
             if (charTex == null
@@ -1321,21 +1422,28 @@ namespace DnD.Managers
 
             // Suppress the public "Generating sprite for X..." message for hidden entities
             // so the player doesn't immediately know what's lurking on the map.
-            if (ChatUI.Instance != null && !isHidden)
+            if (ChatUI.Instance != null && !isHidden && !LLMService.Instance.useDebugSprites)
                 ChatUI.Instance.AddSystemMessage($"Generating sprite for {entityName}...");
 
-            string kind = isEnemy ? "fearsome monster" : "NPC character";
-            string prompt =
-                $"Square, 1:1 aspect ratio. Top-down RPG map token: {entityName}, {kind} "
-                + $"in a {gen.LastTheme} setting, viewed directly from above. "
-                + "Centered on a FULLY TRANSPARENT background — no floor, no tile, no ground. "
-                + "The entity is the only visible element. "
-                + "Match the exact art style, color palette of the reference tile. "
-                + "Flat overhead view, no border, no drop shadow.";
+            Texture2D tex;
+            if (LLMService.Instance.useDebugSprites)
+            {
+                tex = DNDLLM.Utils.DebugSpriteFactory.MakeEntityToken(isEnemy, 64);
+            }
+            else
+            {
+                string kind = isEnemy ? "fearsome monster" : "NPC character";
+                string prompt =
+                    $"Square, 1:1 aspect ratio. Top-down RPG map token: {entityName}, {kind} "
+                    + $"in a {gen.LastTheme} setting, viewed directly from above. "
+                    + "Centered on a FULLY TRANSPARENT background — no floor, no tile, no ground. "
+                    + "The entity is the only visible element. "
+                    + "Match the exact art style, color palette of the reference tile. "
+                    + "Flat overhead view, no border, no drop shadow.";
 
-            Texture2D tex = await LLMService.Instance.GenerateStyledTile(prompt, gen.StyleAnchor);
-            if (tex != null)
-                tex = SpriteBackgroundRemover.RemoveBackground(tex);
+                tex = await LLMService.Instance.GenerateStyledTile(prompt, gen.StyleAnchor);
+                if (tex != null) tex = SpriteBackgroundRemover.RemoveBackground(tex);
+            }
 
             var go = new GameObject($"Entity_{entityName}_{x}_{y}");
             go.AddComponent<SpriteRenderer>();
@@ -1379,27 +1487,27 @@ namespace DnD.Managers
             }
         }
 
-        private async Task StartCampaignAsync(string campaignPrompt)
+        private async Task StartCampaignAsync(string campaignPrompt, CampaignSize size = CampaignSize.Medium)
         {
             _campaignSeed = campaignPrompt;
+            _currentSize  = size;
             if (ChatUI.Instance != null)
-                ChatUI.Instance.AddSystemMessage("Creating your campaign...");
+                ChatUI.Instance.AddSystemMessage($"Designing the {CampaignSizeInfo.Label(size)} campaign...");
 
-            currentCampaign = await dungeonMaster.GenerateCampaignAsync(campaignPrompt, 1);
+            // Structured plan drives map size + features. Fallback handles unreachable LLM.
+            _currentPlan = await dungeonMaster.GenerateCampaignPlanAsync(campaignPrompt, size, 1);
+            if (_currentPlan == null) _currentPlan = CampaignPlan.Fallback(campaignPrompt, size);
 
-            if (currentCampaign != null && ChatUI.Instance != null)
-                ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
-            else
+            // Mirror onto the legacy StoryTimeline so older save paths still display something.
+            currentCampaign = new StoryTimeline
             {
-                // LLM failed — create a minimal campaign so the game can still proceed
-                currentCampaign = new StoryTimeline
-                {
-                    campaignPrompt = campaignPrompt,
-                    timelineText   = "The Dungeon Master considers your actions..."
-                };
-                if (ChatUI.Instance != null)
-                    ChatUI.Instance.AddDMMessage(currentCampaign.timelineText);
-            }
+                campaignPrompt = campaignPrompt,
+                timelineText   = _currentPlan.timelineText ?? _currentPlan.ToReadableText(),
+                partyLevel     = 1,
+            };
+
+            if (ChatUI.Instance != null && !string.IsNullOrEmpty(currentCampaign.timelineText))
+                ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
 
             ChangeState(GameState.CharacterCreation);
         }
@@ -1533,7 +1641,18 @@ namespace DnD.Managers
 
         private async Task HandleDialogueInput(string input)
         {
-            string response = await dungeonMaster.NarrateActionAsync(input, "Dialogue with NPC");
+            // Quick exit keywords let the player bail without an LLM round-trip.
+            string lower = (input ?? "").Trim().ToLowerInvariant();
+            if (lower == "goodbye" || lower == "bye" || lower == "leave" || lower == "exit")
+            {
+                if (ChatUI.Instance != null)
+                    ChatUI.Instance.AddSystemMessage($"You step away from {CurrentDialogueNpc}.");
+                EndDialogue();
+                return;
+            }
+            string ctx = $"Dialogue with {CurrentDialogueNpc ?? "an NPC"}. Stay in character; speak as the NPC. " +
+                         "When the conversation reaches a natural end, call END_DIALOGUE.";
+            string response = await dungeonMaster.NarrateActionAsync(input, ctx);
             // Response automatically displayed via event
         }
 
@@ -1622,6 +1741,22 @@ namespace DnD.Managers
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.AddSystemMessage(message);
+            }
+        }
+
+        /// <summary>Mirrors every chat message into the active slot's history.jsonl.
+        /// Cheap append — the rewrite-on-Save path still runs as a backstop.</summary>
+        private void AppendChatToArchive(string type, string text)
+        {
+            if (string.IsNullOrEmpty(type)) return;
+            try
+            {
+                DNDLLM.Services.CampaignArchive.AppendHistory(_currentSlotIndex,
+                    new DnD.Data.ChatMessageData { type = type, text = text ?? "" });
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[GameManager] AppendHistory failed: {e.Message}");
             }
         }
 

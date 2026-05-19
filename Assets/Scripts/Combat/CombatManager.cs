@@ -5,6 +5,7 @@ using UnityEngine;
 using DnD.Core;
 using DnD.Character;
 using DnD.AI;
+using DnD.Managers;
 
 namespace DnD.Combat
 {
@@ -65,6 +66,11 @@ namespace DnD.Combat
             inCombat = true;
             currentState = BattleState.Start;
 
+            // Switch GameManager into Combat state so the HUD + chat reflect the new mode.
+            if (Managers.GameManager.Instance != null
+                && Managers.GameManager.Instance.GetCurrentState() != GameState.Combat)
+                Managers.GameManager.Instance.ChangeState(GameState.Combat);
+
             StartCoroutine(CombatFlow());
         }
 
@@ -87,19 +93,23 @@ namespace DnD.Combat
                     yield break;
                 }
 
-                if (playerCharacters.All(p => p.currentHitPoints <= 0))
+                // 5e: party is lost only when every member is dead (failed all death saves).
+                // Unconscious-but-not-dead characters can still be revived by allies.
+                if (playerCharacters.All(p => p.isDead || (p.currentHitPoints <= 0 && p.deathSaveFailures >= 3)))
                 {
                     currentState = BattleState.BattleLost;
-                    OnCombatMessage?.Invoke("Defeat! All party members are unconscious!");
+                    OnCombatMessage?.Invoke("Defeat! The party has fallen.");
                     EndCombat(false);
                     yield break;
                 }
 
                 // Execute turn
+                SyncTurnQueueIndex();
                 yield return StartCoroutine(ExecuteTurn());
 
                 // Advance to next combatant
                 currentTurnIndex = (currentTurnIndex + 1) % initiativeOrder.Count;
+                SyncTurnQueueIndex();
 
                 // Update conditions at end of round
                 if (currentTurnIndex == 0)
@@ -133,6 +143,34 @@ namespace DnD.Combat
                 .ToList();
 
             currentTurnIndex = 0;
+
+            // Mirror the combat order into the global TurnQueue so the HUD strip shows
+            // who's up next during combat too. The queue is a view of the same logical
+            // order; CombatManager remains the source of truth for actual turn execution.
+            var gm = GameManager.Instance;
+            if (gm != null)
+            {
+                var orderedChars = initiativeOrder.Select(c => c.character).ToList();
+                gm.Turns.BeginCombat(orderedChars,
+                    c => playerCharacters.Contains(c));
+            }
+        }
+
+        /// <summary>Sync TurnQueue.CurrentIndex with combat's currentTurnIndex so the HUD strip
+        /// highlights the active combatant. Called every time we advance.</summary>
+        private void SyncTurnQueueIndex()
+        {
+            var gm = GameManager.Instance;
+            if (gm == null || gm.Turns.Count == 0) return;
+            // The TurnQueue exposes Compact() / AdvanceTurn(); we mirror by advancing N times
+            // from index 0. Since combat rebuilds the queue at the start, the offsets line up.
+            // Cheaper than adding an explicit "SetCurrent" API.
+            while (gm.Turns.CurrentIndex != currentTurnIndex && gm.Turns.Count > 0)
+            {
+                int before = gm.Turns.CurrentIndex;
+                gm.Turns.AdvanceTurn();
+                if (gm.Turns.CurrentIndex == before) break; // safety: don't loop forever
+            }
         }
 
         private IEnumerator ExecuteTurn()
@@ -140,12 +178,22 @@ namespace DnD.Combat
             var currentCombatant = initiativeOrder[currentTurnIndex];
             var character = currentCombatant.character;
 
+            bool isPlayerCombatant = playerCharacters.Contains(character);
+
             if (character.currentHitPoints <= 0)
             {
-                yield break; // Skip turn if unconscious
+                // Player characters at 0HP roll death saves each turn (D&D 5e).
+                // Enemies just die when downed — no save mechanic for them.
+                if (isPlayerCombatant && !character.isDead && !character.isStable)
+                {
+                    var (_, msg) = character.RollDeathSave();
+                    OnCombatMessage?.Invoke(msg);
+                    if (character.isDead) OnCombatMessage?.Invoke($"{character.characterName} has died.");
+                }
+                yield break;
             }
 
-            bool isPlayer = playerCharacters.Contains(character);
+            bool isPlayer = isPlayerCombatant;
             currentState = isPlayer ? BattleState.PlayerTurn : BattleState.EnemyTurn;
 
             OnCombatMessage?.Invoke($"--- {character.characterName}'s Turn ---");
@@ -172,26 +220,50 @@ namespace DnD.Combat
         {
             yield return new WaitForSeconds(0.5f);
 
-            // Simple AI: attack random player
+            // Preferred: route through the DM tool loop with the enemy as actor.
+            // The LLM can choose a target, narrate, and call DAMAGE/MOVE/etc. just like
+            // the player's turn. If the DM is unavailable, fall back to the dice formula.
+            if (DungeonMaster.Instance != null)
+            {
+                yield return ExecuteEnemyTurnViaDM(enemy);
+                yield break;
+            }
+
+            // Fallback: simple AI — attack a random alive player using the dice formula.
             var alivePlayerTargets = playerCharacters.Where(p => p.currentHitPoints > 0).ToList();
             if (alivePlayerTargets.Count > 0)
             {
                 var target = alivePlayerTargets[Random.Range(0, alivePlayerTargets.Count)];
                 lastAttackSummary = "";
                 ExecuteAttack(enemy, target);
-
-                // Hand the mechanical summary off to the DM for in-character narration.
-                // Fire-and-forget — combat flow continues regardless of the LLM's latency.
-                if (DungeonMaster.Instance != null && !string.IsNullOrEmpty(lastAttackSummary))
-                {
-                    string summary = lastAttackSummary;
-                    string actor = enemy.characterName;
-                    string victim = target.characterName;
-                    _ = DungeonMaster.Instance.NarrateActionAsync(
-                        $"In combat: {actor} attacked {victim}. {summary}",
-                        "Combat narration — describe what just happened in 1-2 vivid sentences.");
-                }
             }
+        }
+
+        /// <summary>Wraps DungeonMaster.RunPlayerTurnAsync to let the LLM drive the enemy.
+        /// Coroutine wrapper because StartCoroutine can't yield a Task directly.</summary>
+        private IEnumerator ExecuteEnemyTurnViaDM(CharacterStats enemy)
+        {
+            var alive = playerCharacters.Where(p => p != null && p.currentHitPoints > 0)
+                                        .Select(p => p.characterName).ToList();
+            string targets = alive.Count > 0 ? string.Join(", ", alive) : "no one";
+
+            string action  = $"It is the enemy's turn. The {enemy.characterName} acts now " +
+                             $"(HP {enemy.currentHitPoints}/{enemy.maxHitPoints}, AC {enemy.armorClass}). " +
+                             $"Possible targets: {targets}. Take exactly one short hostile action — call DAMAGE " +
+                             $"on a target, then end with a 1-2 sentence narration. Do NOT call MOVE for the player.";
+            string ctx     = "Combat — DM controls the enemy. Call exactly one DAMAGE or condition tool, then narrate.";
+            var    runTask = DungeonMaster.Instance.RunPlayerTurnAsync(action, ctx, enemy, maxToolSteps: 4);
+
+            // Yield until the task completes — coroutine bridge.
+            while (!runTask.IsCompleted) yield return null;
+            string narration = "";
+            try { narration = runTask.Result ?? ""; }
+            catch (System.Exception e) { Debug.LogWarning($"[CombatManager] DM enemy turn failed: {e.Message}"); }
+
+            // Narration already lands in the chat via DungeonMaster.OnDMResponse.
+            // We only mirror a compact combat message for the OnCombatMessage subscribers.
+            if (!string.IsNullOrEmpty(narration))
+                OnCombatMessage?.Invoke($"{enemy.characterName} acts.");
         }
 
         public void ExecuteAttack(CharacterStats attacker, CharacterStats target, int weaponDamage = 4, int weaponDamageDie = 6)
@@ -259,6 +331,16 @@ namespace DnD.Combat
             // Wake the player-turn WaitUntil so the coroutine can exit cleanly.
             playerActedThisTurn = true;
             OnCombatEnded?.Invoke(victory);
+
+            // Restore exploration: rebuild the TurnQueue with the party only,
+            // and flip GameManager back to Exploration so chat input is gated correctly.
+            var gm = GameManager.Instance;
+            if (gm != null)
+            {
+                gm.Turns.BeginExploration(gm.Party);
+                if (victory && gm.GetCurrentState() == GameState.Combat)
+                    gm.ChangeState(GameState.Exploration);
+            }
         }
 
         public CharacterStats GetCurrentTurnCharacter()
