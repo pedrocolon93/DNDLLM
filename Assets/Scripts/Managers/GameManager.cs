@@ -89,6 +89,24 @@ namespace DnD.Managers
 
         public CampaignPlan CurrentPlan => _currentPlan;
 
+        /// <summary>NPC the player is currently in dialogue with (null when not in Dialogue state).</summary>
+        public string CurrentDialogueNpc { get; private set; }
+
+        /// <summary>Called by GMToolExecutor TALK_TO. Switches into Dialogue and pins the NPC name.</summary>
+        public void BeginDialogue(string npcName)
+        {
+            CurrentDialogueNpc = (npcName ?? "").Trim();
+            if (string.IsNullOrEmpty(CurrentDialogueNpc)) CurrentDialogueNpc = "stranger";
+            if (currentState != GameState.Dialogue) ChangeState(GameState.Dialogue);
+        }
+
+        /// <summary>Called by GMToolExecutor END_DIALOGUE. Returns to Exploration.</summary>
+        public void EndDialogue()
+        {
+            CurrentDialogueNpc = null;
+            if (currentState == GameState.Dialogue) ChangeState(GameState.Exploration);
+        }
+
         private void Awake()
         {
             if (Instance == null)
@@ -1623,7 +1641,18 @@ namespace DnD.Managers
 
         private async Task HandleDialogueInput(string input)
         {
-            string response = await dungeonMaster.NarrateActionAsync(input, "Dialogue with NPC");
+            // Quick exit keywords let the player bail without an LLM round-trip.
+            string lower = (input ?? "").Trim().ToLowerInvariant();
+            if (lower == "goodbye" || lower == "bye" || lower == "leave" || lower == "exit")
+            {
+                if (ChatUI.Instance != null)
+                    ChatUI.Instance.AddSystemMessage($"You step away from {CurrentDialogueNpc}.");
+                EndDialogue();
+                return;
+            }
+            string ctx = $"Dialogue with {CurrentDialogueNpc ?? "an NPC"}. Stay in character; speak as the NPC. " +
+                         "When the conversation reaches a natural end, call END_DIALOGUE.";
+            string response = await dungeonMaster.NarrateActionAsync(input, ctx);
             // Response automatically displayed via event
         }
 

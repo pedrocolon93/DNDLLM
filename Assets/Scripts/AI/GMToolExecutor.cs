@@ -262,6 +262,20 @@ namespace DnD.AI
                         out_.Add($"Entering: {regionDesc}...");
                     }
                     break;
+
+                case "TALK_TO":
+                    if (p.Length >= 2)
+                    {
+                        string npc = string.Join(" ", p, 1, p.Length - 1).Trim();
+                        Managers.GameManager.Instance?.BeginDialogue(npc);
+                        out_.Add($"You begin speaking with {npc}.");
+                    }
+                    break;
+
+                case "END_DIALOGUE":
+                    Managers.GameManager.Instance?.EndDialogue();
+                    out_.Add("The conversation ends.");
+                    break;
             }
         }
 
@@ -331,6 +345,14 @@ namespace DnD.AI
                 new LLMTool("ENTER_SUBREGION",
                     "Generate a child map and transition the player into it.",
                     "{\"type\":\"object\",\"properties\":{\"description\":{\"type\":\"string\"}},\"required\":[\"description\"]}"),
+
+                new LLMTool("TALK_TO",
+                    "Begin a focused dialogue with a named NPC. Use whenever the player addresses or interacts with a specific NPC. The chat will switch to dialogue mode until END_DIALOGUE.",
+                    "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}"),
+
+                new LLMTool("END_DIALOGUE",
+                    "End the current NPC dialogue and return the player to exploration.",
+                    "{\"type\":\"object\",\"properties\":{}}"),
             };
             return _toolDefs;
         }
@@ -471,6 +493,19 @@ namespace DnD.AI
                         var a = JsonUtility.FromJson<DescArgs>(argsJson) ?? new DescArgs();
                         Managers.GameManager.Instance?.RequestSubregionEntry(a.description ?? "");
                         return $"Entering subregion: {a.description}.";
+                    }
+
+                    case "TALK_TO":
+                    {
+                        var a = JsonUtility.FromJson<NameArgs>(argsJson) ?? new NameArgs();
+                        Managers.GameManager.Instance?.BeginDialogue(a.name ?? "");
+                        return $"Now talking to {a.name}.";
+                    }
+
+                    case "END_DIALOGUE":
+                    {
+                        Managers.GameManager.Instance?.EndDialogue();
+                        return "Dialogue ended.";
                     }
 
                     default:
