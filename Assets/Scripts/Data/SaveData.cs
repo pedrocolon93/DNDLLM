@@ -16,6 +16,10 @@ namespace DnD.Data
         // Campaign
         public string campaignSeed;      // player's initial prompt
         public string campaignTimeline;  // DM's generated intro text
+        // Structured plan (Small/Medium/Large) — populated alongside campaignTimeline.
+        // Older saves leave these empty; loaders treat them as optional.
+        public string campaignSizeName;  // CampaignSize.ToString()
+        public string campaignPlanJson;  // JsonUtility-serialised CampaignPlan
 
         // Character identity
         public string characterName;

@@ -609,9 +609,25 @@ namespace DNDLLM.Services
         /// Asks the LLM to distribute story elements across an NxN logical grid.
         /// Returns a LogicalGrid with terrain_type/feature/description per cell.
         /// </summary>
-        public async Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story)
+        public Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story)
+            => GenerateLogicalGridAsync(size, story, null);
+
+        public async Task<DNDLLM.Map.LogicalGrid> GenerateLogicalGridAsync(int size, string story,
+            System.Collections.Generic.IList<string> requiredFeatures)
         {
             string sys = "You are a DND map architect. You output ONLY valid JSON matching the requested schema — no prose, no markdown fences.";
+            string requiredLine = "";
+            if (requiredFeatures != null && requiredFeatures.Count > 0)
+            {
+                var sb = new StringBuilder("- You MUST place each of these features on at least one tile (each one at most once): ");
+                for (int i = 0; i < requiredFeatures.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(requiredFeatures[i]);
+                }
+                sb.Append('.');
+                requiredLine = sb.ToString() + "\n";
+            }
             string usr =
                 $"Create a logical {size}x{size} grid for this story:\n{story}\n\n" +
                 $"Distribute the major elements (buildings, terrain changes, points of interest) across tiles logically. " +
@@ -622,7 +638,8 @@ namespace DNDLLM.Services
                 $"- Include EVERY cell from (0,0) to ({size-1},{size-1}). That is exactly {size*size} tiles.\n" +
                 $"- terrain_type is one short keyword: grass, dirt, stone, water, sand, wood, cobble, wall, cliff, void.\n" +
                 $"- feature is a short noun (tavern, monastery, armory, well, statue, tree, ...) or empty string if none.\n" +
-                $"- description is one short sentence for the image generator.";
+                $"- description is one short sentence for the image generator.\n" +
+                requiredLine;
             string raw = await SendPrompt(sys, usr);
             if (string.IsNullOrEmpty(raw)) return null;
 

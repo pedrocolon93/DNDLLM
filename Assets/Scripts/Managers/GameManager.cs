@@ -82,6 +82,11 @@ namespace DnD.Managers
         private CommandParser commandParser;
         private ILLMProvider llmProvider;
         private StoryTimeline currentCampaign;
+        // Structured plan emitted by DungeonMaster.GenerateCampaignPlanAsync — drives map size + features.
+        private CampaignPlan  _currentPlan;
+        private CampaignSize  _currentSize = CampaignSize.Medium;
+
+        public CampaignPlan CurrentPlan => _currentPlan;
 
         private void Awake()
         {
@@ -411,8 +416,11 @@ namespace DnD.Managers
 
             if (adventurePromptPopup != null)
             {
-                adventurePromptPopup.OnSubmit = OnAdventurePromptSubmitted;
-                adventurePromptPopup.OnCancel = OnAdventurePromptCancelled;
+                // Prefer the size-aware callback; OnSubmit is the back-compat fallback
+                // (it still fires alongside OnSubmitWithSize, so leave it unset to avoid duplicate work).
+                adventurePromptPopup.OnSubmit          = null;
+                adventurePromptPopup.OnSubmitWithSize  = OnAdventurePromptSubmittedWithSize;
+                adventurePromptPopup.OnCancel          = OnAdventurePromptCancelled;
                 adventurePromptPopup.Open();
             }
             else if (ChatUI.Instance != null)
@@ -427,13 +435,25 @@ namespace DnD.Managers
 
         private async void OnAdventurePromptSubmitted(string prompt)
         {
+            // Back-compat path (no size info). Defaults to Medium.
             if (adventurePromptPopup != null) adventurePromptPopup.Close();
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.ClearChat();
                 ChatUI.Instance.AddSystemMessage("=== NEW ADVENTURE ===");
             }
-            await StartCampaignAsync(prompt);
+            await StartCampaignAsync(prompt, CampaignSize.Medium);
+        }
+
+        private async void OnAdventurePromptSubmittedWithSize(string prompt, CampaignSize size)
+        {
+            if (adventurePromptPopup != null) adventurePromptPopup.Close();
+            if (ChatUI.Instance != null)
+            {
+                ChatUI.Instance.ClearChat();
+                ChatUI.Instance.AddSystemMessage($"=== NEW ADVENTURE — {CampaignSizeInfo.Label(size)} ===");
+            }
+            await StartCampaignAsync(prompt, size);
         }
 
         private void OnAdventurePromptCancelled()
@@ -595,6 +615,8 @@ namespace DnD.Managers
                 cha                   = playerCharacter.abilities.GetScore(AbilityScore.Charisma),
                 campaignSeed          = _campaignSeed,
                 campaignTimeline      = currentCampaign?.timelineText ?? "",
+                campaignSizeName      = _currentPlan != null ? _currentPlan.sizeName : _currentSize.ToString(),
+                campaignPlanJson      = _currentPlan != null ? UnityEngine.JsonUtility.ToJson(_currentPlan) : "",
                 gameState             = currentState.ToString(),
                 messages              = ChatUI.Instance != null
                                             ? ChatUI.Instance.GetMessageHistory()
@@ -812,6 +834,17 @@ namespace DnD.Managers
                     timelineText   = data.campaignTimeline
                 };
 
+            // Restore structured campaign plan if present (new saves). Old saves skip this block.
+            _currentPlan = null;
+            if (!string.IsNullOrEmpty(data.campaignPlanJson))
+            {
+                try { _currentPlan = UnityEngine.JsonUtility.FromJson<CampaignPlan>(data.campaignPlanJson); }
+                catch (System.Exception e) { Debug.LogWarning($"[GameManager] CampaignPlan parse failed: {e.Message}"); }
+            }
+            if (_currentPlan != null) _currentSize = _currentPlan.Size;
+            else if (System.Enum.TryParse<CampaignSize>(data.campaignSizeName ?? "", true, out var parsedSize))
+                _currentSize = parsedSize;
+
             if (ChatUI.Instance != null)
             {
                 ChatUI.Instance.ClearChat();
@@ -888,6 +921,17 @@ namespace DnD.Managers
             MapGenerator.Instance.OnMapReady += OnMapReadyNarrate;
             // Skip LLM description generation when we have saved descriptions to restore
             MapGenerator.Instance.SkipDescriptionGeneration = _pendingTileDescriptions != null;
+
+            // Apply campaign size + plan features before generation. Only do this for a fresh
+            // campaign (no saved map) — reloads must use whatever dims the save expects.
+            if (_pendingMapBackground == null && _pendingTileGrid == null && _currentPlan != null)
+            {
+                int dim = _currentPlan.MapDim;
+                MapGenerator.Instance.width  = dim;
+                MapGenerator.Instance.height = dim;
+                MapGenerator.Instance.KeyFeatures = _currentPlan.keyLocations;
+                MapGenerator.Instance.StartingContext = _currentPlan.startingArea ?? "";
+            }
 
             // If LoadSlot left us a saved map background, skip the 30-60s LLM holistic-paint
             // pipeline entirely and rebuild the visible map from the cached PNG + saved tile grid.
@@ -1034,6 +1078,10 @@ namespace DnD.Managers
             using var _busy = charTex == null
                 ? DNDLLM.Services.BusyIndicator.Show("Generating character sprite…")
                 : null;
+
+            // Debug-sprite shortcut — skip LLM image generation entirely.
+            if (charTex == null && LLMService.Instance != null && LLMService.Instance.useDebugSprites)
+                charTex = DNDLLM.Utils.DebugSpriteFactory.MakeCharacterToken(64);
 
             // Generate a top-down character token styled to match the map's tiles
             if (charTex == null
@@ -1321,21 +1369,28 @@ namespace DnD.Managers
 
             // Suppress the public "Generating sprite for X..." message for hidden entities
             // so the player doesn't immediately know what's lurking on the map.
-            if (ChatUI.Instance != null && !isHidden)
+            if (ChatUI.Instance != null && !isHidden && !LLMService.Instance.useDebugSprites)
                 ChatUI.Instance.AddSystemMessage($"Generating sprite for {entityName}...");
 
-            string kind = isEnemy ? "fearsome monster" : "NPC character";
-            string prompt =
-                $"Square, 1:1 aspect ratio. Top-down RPG map token: {entityName}, {kind} "
-                + $"in a {gen.LastTheme} setting, viewed directly from above. "
-                + "Centered on a FULLY TRANSPARENT background — no floor, no tile, no ground. "
-                + "The entity is the only visible element. "
-                + "Match the exact art style, color palette of the reference tile. "
-                + "Flat overhead view, no border, no drop shadow.";
+            Texture2D tex;
+            if (LLMService.Instance.useDebugSprites)
+            {
+                tex = DNDLLM.Utils.DebugSpriteFactory.MakeEntityToken(isEnemy, 64);
+            }
+            else
+            {
+                string kind = isEnemy ? "fearsome monster" : "NPC character";
+                string prompt =
+                    $"Square, 1:1 aspect ratio. Top-down RPG map token: {entityName}, {kind} "
+                    + $"in a {gen.LastTheme} setting, viewed directly from above. "
+                    + "Centered on a FULLY TRANSPARENT background — no floor, no tile, no ground. "
+                    + "The entity is the only visible element. "
+                    + "Match the exact art style, color palette of the reference tile. "
+                    + "Flat overhead view, no border, no drop shadow.";
 
-            Texture2D tex = await LLMService.Instance.GenerateStyledTile(prompt, gen.StyleAnchor);
-            if (tex != null)
-                tex = SpriteBackgroundRemover.RemoveBackground(tex);
+                tex = await LLMService.Instance.GenerateStyledTile(prompt, gen.StyleAnchor);
+                if (tex != null) tex = SpriteBackgroundRemover.RemoveBackground(tex);
+            }
 
             var go = new GameObject($"Entity_{entityName}_{x}_{y}");
             go.AddComponent<SpriteRenderer>();
@@ -1379,27 +1434,27 @@ namespace DnD.Managers
             }
         }
 
-        private async Task StartCampaignAsync(string campaignPrompt)
+        private async Task StartCampaignAsync(string campaignPrompt, CampaignSize size = CampaignSize.Medium)
         {
             _campaignSeed = campaignPrompt;
+            _currentSize  = size;
             if (ChatUI.Instance != null)
-                ChatUI.Instance.AddSystemMessage("Creating your campaign...");
+                ChatUI.Instance.AddSystemMessage($"Designing the {CampaignSizeInfo.Label(size)} campaign...");
 
-            currentCampaign = await dungeonMaster.GenerateCampaignAsync(campaignPrompt, 1);
+            // Structured plan drives map size + features. Fallback handles unreachable LLM.
+            _currentPlan = await dungeonMaster.GenerateCampaignPlanAsync(campaignPrompt, size, 1);
+            if (_currentPlan == null) _currentPlan = CampaignPlan.Fallback(campaignPrompt, size);
 
-            if (currentCampaign != null && ChatUI.Instance != null)
-                ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
-            else
+            // Mirror onto the legacy StoryTimeline so older save paths still display something.
+            currentCampaign = new StoryTimeline
             {
-                // LLM failed — create a minimal campaign so the game can still proceed
-                currentCampaign = new StoryTimeline
-                {
-                    campaignPrompt = campaignPrompt,
-                    timelineText   = "The Dungeon Master considers your actions..."
-                };
-                if (ChatUI.Instance != null)
-                    ChatUI.Instance.AddDMMessage(currentCampaign.timelineText);
-            }
+                campaignPrompt = campaignPrompt,
+                timelineText   = _currentPlan.timelineText ?? _currentPlan.ToReadableText(),
+                partyLevel     = 1,
+            };
+
+            if (ChatUI.Instance != null && !string.IsNullOrEmpty(currentCampaign.timelineText))
+                ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
 
             ChangeState(GameState.CharacterCreation);
         }
