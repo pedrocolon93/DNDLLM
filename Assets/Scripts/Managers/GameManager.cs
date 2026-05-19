@@ -769,18 +769,18 @@ namespace DnD.Managers
             }
             if (data == null)
             {
-                var loaded = DNDLLM.Services.SaveSystem.Load(slotIndex);
-                if (loaded == null || loaded.Data == null)
+                var flat = DNDLLM.Services.SaveSystem.Load(slotIndex);
+                if (flat == null || flat.Data == null)
                 {
                     Debug.LogWarning($"[GameManager] Slot {slotIndex} is empty.");
                     ChangeState(GameState.MainMenu);
                     return;
                 }
-                data        = loaded.Data;
-                portrait    = loaded.Portrait;
-                mapToken    = loaded.MapToken;
-                mapBg       = loaded.MapBackground;
-                entSprites  = loaded.EntitySprites;
+                data        = flat.Data;
+                portrait    = flat.Portrait;
+                mapToken    = flat.MapToken;
+                mapBg       = flat.MapBackground;
+                entSprites  = flat.EntitySprites;
             }
             // shadow the old "loaded.*" accessors below
             var loadedShim = new DNDLLM.Services.SlotLoadResult
