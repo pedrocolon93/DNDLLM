@@ -498,12 +498,41 @@ namespace DnD.AI
 
         private static void SpawnEnemy(string name, int hp, int ac)
         {
-            var go = new GameObject(name);
-            var stats = go.AddComponent<CharacterStats>();
+            var stats = new GameObject(name).AddComponent<CharacterStats>();
             stats.characterName    = name;
             stats.maxHitPoints     = hp;
             stats.currentHitPoints = hp;
             stats.armorClass       = ac;
+
+            // Also drop a token onto the map next to the player so the enemy is visible
+            // and survives the combat state transition. The token uses the debug-sprite
+            // entity texture when sprites are debug-mode; otherwise stays untextured
+            // (the existing entity-spawn path generates art separately).
+            var gen = MapGenerator.Instance;
+            var cc  = MapCharacterController.Instance;
+            if (gen != null && cc != null && gen.grid != null)
+            {
+                int sx = Mathf.Clamp(cc.GridX + 1, 0, gen.width - 1);
+                int sy = cc.GridY;
+                // If the adjacent tile is blocked, scan outward for the nearest walkable cell.
+                if (!gen.grid[sx, sy].walkable)
+                {
+                    foreach (var (ox, oy) in new (int, int)[] { (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1) })
+                    {
+                        int tx = Mathf.Clamp(cc.GridX + ox, 0, gen.width - 1);
+                        int ty = Mathf.Clamp(cc.GridY + oy, 0, gen.height - 1);
+                        if (gen.grid[tx, ty].walkable) { sx = tx; sy = ty; break; }
+                    }
+                }
+                var tex = DNDLLM.Services.LLMService.Instance != null
+                          && DNDLLM.Services.LLMService.Instance.useDebugSprites
+                    ? DNDLLM.Utils.DebugSpriteFactory.MakeEntityToken(isEnemy: true, 64)
+                    : null;
+                var entGO = new GameObject($"Entity_{name}_{sx}_{sy}");
+                entGO.AddComponent<UnityEngine.SpriteRenderer>();
+                var ec = entGO.AddComponent<MapEntityController>();
+                ec.Initialize(tex, name, sx, sy, hp, ac, isEnemy: true, isHidden: false);
+            }
 
             var playerChar = Managers.GameManager.Instance?.GetPlayerCharacter();
             if (playerChar != null)
