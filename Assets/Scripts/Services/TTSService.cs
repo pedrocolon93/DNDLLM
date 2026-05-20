@@ -21,7 +21,7 @@ namespace DNDLLM.Services
         [Header("General")]
         [SerializeField] private bool enabled_ = true;
         [SerializeField, Range(0f, 1f)] private float volume = 0.9f;
-        [SerializeField] private TtsProvider provider = TtsProvider.OpenRouter;
+        [SerializeField] private TtsProvider provider = TtsProvider.ElevenLabs;
 
         [Header("OpenRouter")]
         [SerializeField] private string model = "openai/gpt-audio";
