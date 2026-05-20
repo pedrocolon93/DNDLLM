@@ -1587,8 +1587,21 @@ namespace DnD.Managers
             }
         }
 
+        /// <summary>RAII-style input gating so HandleExplorationInput / HandleDialogueInput give
+        /// the user clear visual feedback: input disables while the DM thinks, re-enables on return.</summary>
+        private struct InputGate : System.IDisposable
+        {
+            public static InputGate Acquire()
+            {
+                ChatUI.Instance?.SetInputEnabled(false);
+                return new InputGate();
+            }
+            public void Dispose() => ChatUI.Instance?.SetInputEnabled(true);
+        }
+
         private async Task HandleExplorationInput(string input)
         {
+            using var _gate = InputGate.Acquire();
             // ── Fast-path: explicit direction keywords move immediately. ─────
             string movementNote = "";
             if (TryParseMovement(input, out int dx, out int dy))
@@ -1683,6 +1696,7 @@ namespace DnD.Managers
 
         private async Task HandleDialogueInput(string input)
         {
+            using var _gate = InputGate.Acquire();
             // Quick exit keywords let the player bail without an LLM round-trip.
             string lower = (input ?? "").Trim().ToLowerInvariant();
             if (lower == "goodbye" || lower == "bye" || lower == "leave" || lower == "exit")

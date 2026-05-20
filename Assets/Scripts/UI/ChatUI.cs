@@ -302,11 +302,17 @@ namespace DnD.UI
         private const string PlayGlyph = "›";
         private const string StopGlyph = "×";
 
-        /// <summary>Attach a play/stop TTS button to a DM message bubble. No-op if TTSService is missing or disabled.</summary>
+        /// <summary>Attach a play/stop TTS button to a DM message bubble. No-op if TTSService is
+        /// missing, disabled, or has no usable credentials — a dead button is worse than no button.</summary>
         private void AttachPlayButton(GameObject bubble, string text)
         {
             var tts = DNDLLM.Services.TTSService.Instance;
             if (tts == null || !tts.Enabled) return;
+
+            // Both supported providers (OpenRouter, ElevenLabs) need an API key. If the key
+            // is missing or has been redacted (e.g. by secret-scrubbing), skip the button so
+            // the player doesn't see a control that silently fails.
+            if (!HasUsableTtsCredentials(tts)) return;
 
             var btnGO = new GameObject("TTSButton", typeof(RectTransform));
             btnGO.transform.SetParent(bubble.transform, false);
@@ -354,6 +360,31 @@ namespace DnD.UI
                 s.OnPlaybackStarted -= onStart;
                 s.OnPlaybackStopped -= onStop;
             };
+        }
+
+        /// <summary>Returns true when the configured TTS provider has a key that looks usable.
+        /// "REDACTED" and the OpenRouter placeholder are treated as missing.</summary>
+        private static bool HasUsableTtsCredentials(DNDLLM.Services.TTSService tts)
+        {
+            string key = "";
+            if (tts.Provider == DNDLLM.Services.TtsProvider.OpenRouter)
+            {
+                // OpenRouter TTS reuses LLMService's apiKey
+                key = DNDLLM.Services.LLMService.Instance != null
+                    ? DNDLLM.Services.LLMService.Instance.ApiKey
+                    : "";
+            }
+            else
+            {
+                // ElevenLabs path — read from TTSService via reflection (private field).
+                var f = typeof(DNDLLM.Services.TTSService).GetField("elevenLabsApiKey",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                key = f != null ? (f.GetValue(tts) as string ?? "") : "";
+            }
+            if (string.IsNullOrWhiteSpace(key)) return false;
+            string lower = key.Trim().ToLowerInvariant();
+            if (lower == "redacted" || lower.StartsWith("sk-or-v1-your")) return false;
+            return true;
         }
 
         // ── Tappable options ──────────────────────────────────────────
