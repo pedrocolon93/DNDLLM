@@ -51,6 +51,11 @@ namespace DnD.Managers
         [Tooltip("Use the in-process MockLLMProvider instead of the real LLMService (for offline development).")]
         [SerializeField] private bool useMockLLM = false;
 
+        [Header("Campaign reveal")]
+        [Tooltip("When true the full campaign plan (hook, beats, climax, resolution) is dumped into chat at start. " +
+                 "Off by default so players don't see what the DM has planned.")]
+        [SerializeField] private bool revealCampaignToPlayer = false;
+
         [Header("UI — set by UISceneBuilder")]
         [SerializeField] private DnD.UI.TitleScreen             titleScreen;
         [SerializeField] private DnD.UI.AdventurePromptPopup    adventurePromptPopup;
@@ -986,6 +991,11 @@ namespace DnD.Managers
                 MapGenerator.Instance.StartingContext = _currentPlan.startingArea ?? "";
             }
 
+            // Build the richer story string for map generation. The LLM's logical-grid prompt
+            // gets the seed PLUS the plan's startingArea + hook so the map reflects the actual
+            // campaign — not just the raw user phrase.
+            string mapStory = BuildMapStoryFromPlan();
+
             // If LoadSlot left us a saved map background, skip the 30-60s LLM holistic-paint
             // pipeline entirely and rebuild the visible map from the cached PNG + saved tile grid.
             if (_pendingMapBackground != null && _pendingTileGrid != null)
@@ -1001,8 +1011,22 @@ namespace DnD.Managers
                 return;
             }
 
-            MapGenerator.Instance.GenerateMap(
-                _campaignSeed.Length > 0 ? _campaignSeed : "dungeon");
+            MapGenerator.Instance.GenerateMap(mapStory);
+        }
+
+        /// <summary>Build a richer story string for the logical-grid LLM call by combining the
+        /// raw seed with the structured plan's startingArea and hook. Falls back to just the
+        /// seed when no plan exists (legacy save reload).</summary>
+        private string BuildMapStoryFromPlan()
+        {
+            string seed = _campaignSeed.Length > 0 ? _campaignSeed : "dungeon";
+            if (_currentPlan == null) return seed;
+            var sb = new System.Text.StringBuilder(seed);
+            if (!string.IsNullOrEmpty(_currentPlan.startingArea))
+                sb.Append("\n\nStarting area: ").Append(_currentPlan.startingArea);
+            if (!string.IsNullOrEmpty(_currentPlan.hook))
+                sb.Append("\n\nHook: ").Append(_currentPlan.hook);
+            return sb.ToString();
         }
 
         private async void OnMapReadyNarrate()
@@ -1499,6 +1523,8 @@ namespace DnD.Managers
             if (_currentPlan == null) _currentPlan = CampaignPlan.Fallback(campaignPrompt, size);
 
             // Mirror onto the legacy StoryTimeline so older save paths still display something.
+            // The full plan ALWAYS lives here for save/load + DM reference; only the chat
+            // intro is gated by revealCampaignToPlayer.
             currentCampaign = new StoryTimeline
             {
                 campaignPrompt = campaignPrompt,
@@ -1506,8 +1532,24 @@ namespace DnD.Managers
                 partyLevel     = 1,
             };
 
-            if (ChatUI.Instance != null && !string.IsNullOrEmpty(currentCampaign.timelineText))
-                ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
+            if (ChatUI.Instance != null)
+            {
+                if (revealCampaignToPlayer)
+                {
+                    // Reveal mode: dump the full structured plan so the player sees beats + climax.
+                    if (!string.IsNullOrEmpty(currentCampaign.timelineText))
+                        ChatUI.Instance.AddDMMessage(currentCampaign.timelineText, useTypewriter: true);
+                }
+                else
+                {
+                    // Hidden mode: only show the hook (and starting-area line if present). Players
+                    // discover the rest through play; the DM still has the full plan in memory.
+                    string opening = !string.IsNullOrEmpty(_currentPlan.hook) ? _currentPlan.hook : "An adventure begins.";
+                    if (!string.IsNullOrEmpty(_currentPlan.startingArea))
+                        opening = $"{opening}\n\n<i>Starting area: {_currentPlan.startingArea}</i>";
+                    ChatUI.Instance.AddDMMessage(opening, useTypewriter: true);
+                }
+            }
 
             ChangeState(GameState.CharacterCreation);
         }
