@@ -16,7 +16,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // ── Remove old Canvas ─────────────────────────────────────────
-        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(c.gameObject);
 
         // ── EventSystem (required for any UI button to receive clicks) ─
@@ -420,7 +420,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // Remove old TitleScreen canvas if present
-        foreach (var c in Object.FindObjectsByType<DnD.UI.TitleScreen>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var c in Object.FindObjectsByType<DnD.UI.TitleScreen>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(c.gameObject);
 
         // ── Canvas (sortingOrder=20, renders above everything) ─────────
@@ -628,7 +628,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // Remove old popup canvas
-        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterCreationPopup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterCreationPopup>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // ── Canvas (sortingOrder=10) ────────────────────────────────────
@@ -1291,7 +1291,7 @@ public static class UISceneBuilder
     {
         var scene = EditorSceneManager.GetActiveScene();
 
-        foreach (var p in Object.FindObjectsByType<DnD.UI.AdventurePromptPopup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.AdventurePromptPopup>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // Canvas (sortingOrder=17 — above EditMap=16, below TitleScreen=20)
@@ -1415,7 +1415,7 @@ public static class UISceneBuilder
     {
         var scene = EditorSceneManager.GetActiveScene();
 
-        foreach (var p in Object.FindObjectsByType<DnD.UI.EditMapPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.EditMapPanel>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // Canvas (sortingOrder=16 — above InGameMenu=15)
@@ -1662,7 +1662,7 @@ public static class UISceneBuilder
     {
         var scene = EditorSceneManager.GetActiveScene();
 
-        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterScreenPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.CharacterScreenPanel>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // Canvas (sortingOrder=12)
@@ -1887,7 +1887,7 @@ public static class UISceneBuilder
         var scene = EditorSceneManager.GetActiveScene();
 
         // Remove old panel
-        foreach (var p in Object.FindObjectsByType<DnD.UI.InGameMenuPanel>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        foreach (var p in Object.FindObjectsByType<DnD.UI.InGameMenuPanel>(FindObjectsInactive.Exclude))
             Undo.DestroyObjectImmediate(p.gameObject);
 
         // ── Canvas (sortingOrder=15, above HUD but below TitleScreen=20) ─
