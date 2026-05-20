@@ -62,6 +62,12 @@ namespace DNDLLM.Services
             _source.playOnAwake  = false;
             _source.spatialBlend = 0f;  // 2D
             _source.volume       = volume;
+
+            // Overlay placeholder Inspector values with keys from local_secrets.json
+            // so the scene file can stay free of real secrets.
+            var s = SecretsLoader.Load();
+            if (s != null)
+                elevenLabsApiKey = SecretsLoader.Resolve(elevenLabsApiKey, s.elevenLabsApiKey);
         }
 
         public void Stop()

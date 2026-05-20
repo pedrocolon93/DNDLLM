@@ -15,6 +15,11 @@
 Assets/masterscene.unity
 Assets/masterscene.unity.meta
 
+# Local API keys for LLMService / TTSService — loaded at runtime by SecretsLoader.
+# Commit only the .example template so collaborators know the schema.
+Assets/StreamingAssets/local_secrets.json
+Assets/StreamingAssets/local_secrets.json.meta
+
 # Unity package binaries (large executables shipped with packages)
 **/RelayApp~/
 Packages/com.unity.ai.assistant/

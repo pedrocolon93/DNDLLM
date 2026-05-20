@@ -49,7 +49,17 @@ namespace DNDLLM.Services
                 Instance = this;
                 DontDestroyOnLoad(gameObject);
             }
-            else Destroy(gameObject);
+            else { Destroy(gameObject); return; }
+
+            // Overlay placeholder Inspector values with keys from
+            // Assets/StreamingAssets/local_secrets.json (gitignored). Real Inspector
+            // values still win so the existing wire-up keeps working.
+            var s = SecretsLoader.Load();
+            if (s != null)
+            {
+                apiKey      = SecretsLoader.Resolve(apiKey,      s.openRouterApiKey);
+                localApiKey = SecretsLoader.Resolve(localApiKey, s.localApiKey);
+            }
         }
 
         [System.Serializable]
