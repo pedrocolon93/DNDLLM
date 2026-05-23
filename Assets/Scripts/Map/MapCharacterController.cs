@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 using DnD.Character;
+using DnD.Core;
+using DnD.Managers;
 
 namespace DNDLLM.Map
 {
@@ -82,6 +84,8 @@ namespace DNDLLM.Map
             }
 
             MoveTo(startX, startY);
+            if (MapGenerator.Instance != null)
+                MapGenerator.Instance.RevealAround(startX, startY);
         }
 
         /// <summary>
@@ -97,7 +101,27 @@ namespace DNDLLM.Map
             if (ny < 0 || ny >= MapGenerator.Instance.height) return false;
             if (!MapGenerator.Instance.grid[nx, ny].walkable) return false;
             MoveTo(nx, ny);
+            MapGenerator.Instance.RevealAround(nx, ny);
+            CheckEncounterAt(nx, ny);
             return true;
+        }
+
+        public int MoveTo(int tx, int ty, bool stepByStep)
+        {
+            if (!stepByStep) { MoveTo(tx, ty); return 0; }
+            int steps = 0;
+            int guard = 0;
+            int max = (MapGenerator.Instance != null) ? (MapGenerator.Instance.width + MapGenerator.Instance.height) : 64;
+            while ((GridX != tx || GridY != ty) && guard++ < max)
+            {
+                int sdx = tx > GridX ? 1 : (tx < GridX ? -1 : 0);
+                int sdy = ty > GridY ? 1 : (ty < GridY ? -1 : 0);
+                bool moved = false;
+                if (sdx != 0 && TryMove(sdx, 0)) { steps++; moved = true; }
+                else if (sdy != 0 && TryMove(0, sdy)) { steps++; moved = true; }
+                if (!moved) break;
+            }
+            return steps;
         }
 
         public void MoveTo(int x, int y)
@@ -107,6 +131,49 @@ namespace DNDLLM.Map
             float cs = MapGenerator.Instance != null ? MapGenerator.Instance.cellSize : 1f;
             // y = 0.05 prevents Z-fighting with the floor tiles at y = 0
             transform.position = new Vector3(x * cs, 0.05f, y * cs);
+        }
+
+        private void CheckEncounterAt(int x, int y)
+        {
+            var gen = MapGenerator.Instance;
+            if (gen?.grid == null) return;
+            if (GameManager.Instance == null) return;
+            if (GameManager.Instance.GetCurrentState() == GameState.Combat) return;
+
+            bool hostileHere = false;
+            string foeName = "Goblin";
+            int foeHp = 7, foeAc = 12, foeDex = 14;
+            foreach (var e in MapEntityController.All)
+            {
+                if (e == null || !e.IsEnemy || e.IsHidden) continue;
+                if (e.GridX == x && e.GridY == y)
+                {
+                    hostileHere = true;
+                    if (!string.IsNullOrEmpty(e.EntityName)) foeName = e.EntityName;
+                    foeHp = e.HP > 0 ? e.HP : foeHp;
+                    foeAc = e.AC > 0 ? e.AC : foeAc;
+                    break;
+                }
+            }
+
+            bool spawnTile = gen.grid[x, y].type == TileType.EnemySpawn;
+            if (!hostileHere && !spawnTile) return;
+
+            var enemyGO = new GameObject(foeName);
+            var enemy = enemyGO.AddComponent<CharacterStats>();
+            enemy.characterName    = foeName;
+            enemy.maxHitPoints     = foeHp;
+            enemy.currentHitPoints = foeHp;
+            enemy.armorClass       = foeAc;
+            enemy.abilities        = new AbilityScores(10, foeDex, 10, 8, 8, 8);
+
+            if (spawnTile)
+            {
+                gen.grid[x, y].type     = TileType.Floor;
+                gen.grid[x, y].walkable = true;
+            }
+
+            GameManager.Instance.EnterCombat(new List<CharacterStats> { enemy });
         }
     }
 }

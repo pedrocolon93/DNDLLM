@@ -319,6 +319,7 @@ public static class UISceneBuilder
         "EditMapCanvas",
         "CharacterScreenCanvas",
         "InGameMenuCanvas",
+        "CombatHUDCanvas",
     };
 
     [MenuItem("DnD/Cleanup Scene")]
@@ -354,6 +355,7 @@ public static class UISceneBuilder
         BuildInGameMenuPanel();
         BuildEditMapPanel();
         BuildCharacterScreen();
+        BuildCombatHUD();
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         Debug.Log("[UISceneBuilder] Full scene setup complete. Press Ctrl+S to save.");
     }
@@ -2059,5 +2061,76 @@ public static class UISceneBuilder
         divRT.offsetMin = new Vector2(8, 0);
         divRT.offsetMax = new Vector2(-8, 2);
         divGO.AddComponent<Image>().color = UITheme.GoldAccent;
+    }
+
+    [MenuItem("DnD/Build Combat HUD")]
+    public static void BuildCombatHUD()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+
+        foreach (var h in Object.FindObjectsByType<DnD.UI.CombatHUD>(FindObjectsInactive.Include))
+            Undo.DestroyObjectImmediate(h.gameObject);
+        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include))
+            if (c != null && c.name == "CombatHUDCanvas")
+                Undo.DestroyObjectImmediate(c.gameObject);
+
+        var canvasGO = new GameObject("CombatHUDCanvas");
+        Undo.RegisterCreatedObjectUndo(canvasGO, "Build Combat HUD");
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 5;
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight  = 0.5f;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        var rootGO = MakeGO("HUDRoot", canvasGO.transform);
+        var rootRT = rootGO.GetComponent<RectTransform>();
+        rootRT.anchorMin        = new Vector2(0.5f, 1f);
+        rootRT.anchorMax        = new Vector2(0.5f, 1f);
+        rootRT.pivot            = new Vector2(0.5f, 1f);
+        rootRT.sizeDelta        = new Vector2(360, 64);
+        rootRT.anchoredPosition = new Vector2(0, -12);
+
+        var bg = rootGO.AddComponent<Image>();
+        bg.color = new Color(0f, 0f, 0f, 0.65f);
+
+        var vlg = rootGO.AddComponent<VerticalLayoutGroup>();
+        vlg.padding                = new RectOffset(12, 12, 6, 6);
+        vlg.spacing                = 2;
+        vlg.childAlignment         = TextAnchor.MiddleCenter;
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childControlWidth      = true;
+        vlg.childControlHeight     = true;
+
+        var turnGO = MakeGO("TurnLabel", rootGO.transform);
+        turnGO.AddComponent<LayoutElement>().preferredHeight = 26;
+        var turnTmp = turnGO.AddComponent<TextMeshProUGUI>();
+        turnTmp.text      = "Turn: —";
+        turnTmp.fontSize  = 18f;
+        turnTmp.color     = Color.white;
+        turnTmp.alignment = TextAlignmentOptions.Center;
+        turnTmp.fontStyle = FontStyles.Bold;
+
+        var hpGO = MakeGO("HPLabel", rootGO.transform);
+        hpGO.AddComponent<LayoutElement>().preferredHeight = 18;
+        var hpTmp = hpGO.AddComponent<TextMeshProUGUI>();
+        hpTmp.text      = "HP: — / —";
+        hpTmp.fontSize  = 13f;
+        hpTmp.color     = new Color(0.92f, 0.92f, 0.92f, 1f);
+        hpTmp.alignment = TextAlignmentOptions.Center;
+
+        var hud = canvasGO.AddComponent<DnD.UI.CombatHUD>();
+        var so = new SerializedObject(hud);
+        so.FindProperty("turnLabel").objectReferenceValue = turnTmp;
+        so.FindProperty("hpLabel").objectReferenceValue   = hpTmp;
+        so.FindProperty("root").objectReferenceValue      = rootGO;
+        so.ApplyModifiedProperties();
+
+        rootGO.SetActive(false);
+        EditorSceneManager.MarkSceneDirty(scene);
+        Debug.Log("[UISceneBuilder] CombatHUD built. Press Ctrl+S to save.");
     }
 }

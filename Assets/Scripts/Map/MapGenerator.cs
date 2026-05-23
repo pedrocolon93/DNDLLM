@@ -78,6 +78,7 @@ namespace DNDLLM.Map
             public string[,]    tileDescs;
             public Texture2D[,] tileVisuals;
             public bool[,]      walkable;
+            public bool[,]      discovered;
             public int          playerX, playerY;
             public Texture2D    styleAnchor;
             // Strategy D: holistic background image (overrides per-tile visuals when set).
@@ -88,6 +89,11 @@ namespace DNDLLM.Map
         public GameObject tilePrefab; // Optional prefab override
 
         public MapTile[,] grid;
+
+        public bool[,] discovered;
+        private GameObject[,] fogObjs;
+        private Transform fogRoot;
+        private Texture2D fogTexture;
 
         private void Awake()
         {
@@ -136,6 +142,7 @@ namespace DNDLLM.Map
             // Hydrate grid[,] directly from the save (skipping the per-cell overlay loop in
             // OnMapReadyNarrate; that loop becomes a no-op when the grid is already correct).
             grid = new MapTile[width, height];
+            InitDiscovered();
             for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 grid[x, y] = new MapTile { x = x, y = y, type = TileType.Floor, walkable = true, description = "" };
@@ -162,6 +169,7 @@ namespace DNDLLM.Map
             if (DnD.UI.ChatUI.Instance != null)
                 DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Map restored from save.");
 
+            RebuildFog();
             OnMapReady?.Invoke();
             AdjustCamera();
         }
@@ -201,6 +209,7 @@ namespace DNDLLM.Map
 
             // Hydrate grid[,] from the logical grid (drives walkability, descriptions, spawns)
             grid = new MapTile[width, height];
+            InitDiscovered();
             for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
@@ -258,6 +267,7 @@ namespace DNDLLM.Map
             if (DnD.UI.ChatUI.Instance != null)
                 DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Map ready.");
 
+            RebuildFog();
             OnMapReady?.Invoke();
             AdjustCamera();
         }
@@ -321,6 +331,7 @@ namespace DNDLLM.Map
 
             // ── 1. Plan tile layout ──────────────────────────────────────────
             grid = new MapTile[width, height];
+            InitDiscovered();
             if (IsTownTheme(theme))
                 GenerateTownLayout();
             else
@@ -385,6 +396,7 @@ namespace DNDLLM.Map
             if (DnD.UI.ChatUI.Instance != null)
                 DnD.UI.ChatUI.Instance.AddSystemMessage("Map ready.");
 
+            RebuildFog();
             OnMapReady?.Invoke();
             Debug.Log("[MapGenerator] Generation complete.");
             AdjustCamera();
@@ -598,6 +610,86 @@ namespace DNDLLM.Map
             float ppu = texture.width / cellSize;
             Sprite sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f), ppu);
             sr.sprite = sprite;
+        }
+
+        private void InitDiscovered()
+        {
+            discovered = new bool[width, height];
+            fogObjs    = new GameObject[width, height];
+            fogRoot    = null;
+        }
+
+        public void RevealAround(int x, int y, int radius = 2)
+        {
+            if (discovered == null || grid == null) return;
+            bool changed = false;
+            int x0 = Mathf.Max(0, x - radius);
+            int x1 = Mathf.Min(width  - 1, x + radius);
+            int y0 = Mathf.Max(0, y - radius);
+            int y1 = Mathf.Min(height - 1, y + radius);
+            for (int xx = x0; xx <= x1; xx++)
+                for (int yy = y0; yy <= y1; yy++)
+                    if (!discovered[xx, yy]) { discovered[xx, yy] = true; changed = true; }
+            if (changed) RebuildFog();
+        }
+
+        private Texture2D GetFogTexture()
+        {
+            if (fogTexture != null) return fogTexture;
+            fogTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            var px = new Color32[4];
+            for (int i = 0; i < 4; i++) px[i] = new Color32(0, 0, 0, 255);
+            fogTexture.SetPixels32(px);
+            fogTexture.filterMode = FilterMode.Point;
+            fogTexture.Apply();
+            return fogTexture;
+        }
+
+        private void EnsureFogRoot()
+        {
+            if (fogRoot != null) return;
+            var go = new GameObject("FogOfWar");
+            go.transform.parent   = transform;
+            go.transform.position = Vector3.zero;
+            go.transform.rotation = Quaternion.identity;
+            fogRoot = go.transform;
+        }
+
+        public void RebuildFog()
+        {
+            if (discovered == null || grid == null) return;
+            EnsureFogRoot();
+            if (fogObjs == null || fogObjs.GetLength(0) != width || fogObjs.GetLength(1) != height)
+                fogObjs = new GameObject[width, height];
+
+            for (int x = 0; x < width; x++)
+                for (int y = 0; y < height; y++)
+                {
+                    bool needFog = !discovered[x, y];
+                    var existing = fogObjs[x, y];
+                    if (needFog)
+                    {
+                        if (existing == null)
+                        {
+                            var fog = new GameObject($"Fog_{x}_{y}");
+                            fog.transform.parent   = fogRoot;
+                            fog.transform.position = new Vector3(x * cellSize, 0.1f, y * cellSize);
+                            fog.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                            var sr = fog.AddComponent<SpriteRenderer>();
+                            sr.sortingOrder = 10;
+                            var tex = GetFogTexture();
+                            float ppu = tex.width / cellSize;
+                            sr.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), ppu);
+                            sr.color = Color.black;
+                            fogObjs[x, y] = fog;
+                        }
+                    }
+                    else if (existing != null)
+                    {
+                        Destroy(existing);
+                        fogObjs[x, y] = null;
+                    }
+                }
         }
 
         private void AdjustCamera()
@@ -826,6 +918,7 @@ namespace DNDLLM.Map
                 tileDescs       = new string[width, height],
                 tileVisuals     = new Texture2D[width, height],
                 walkable        = new bool[width, height],
+                discovered      = new bool[width, height],
             };
             for (int x = 0; x < width; x++)
                 for (int y = 0; y < height; y++)
@@ -834,6 +927,7 @@ namespace DNDLLM.Map
                     snap.tileDescs[x, y]   = grid[x, y].description;
                     snap.tileVisuals[x, y] = grid[x, y].visual;
                     snap.walkable[x, y]    = grid[x, y].walkable;
+                    snap.discovered[x, y]  = discovered != null && discovered[x, y];
                 }
             return snap;
         }
@@ -852,6 +946,7 @@ namespace DNDLLM.Map
             _lastTheme  = snap.lastTheme;
             StyleAnchor = snap.styleAnchor;
             grid        = new MapTile[width, height];
+            InitDiscovered();
 
             for (int x = 0; x < width; x++)
                 for (int y = 0; y < height; y++)
@@ -865,6 +960,10 @@ namespace DNDLLM.Map
                         visual      = snap.tileVisuals[x, y],
                         walkable    = snap.walkable[x, y],
                     };
+                    if (snap.discovered != null
+                        && x < snap.discovered.GetLength(0)
+                        && y < snap.discovered.GetLength(1))
+                        discovered[x, y] = snap.discovered[x, y];
                     // Strategy D: skip per-tile sprites when a background image is present.
                     if (snap.backgroundImage == null)
                         CreateTileVisual(x, y, snap.tileVisuals[x, y] ?? Texture2D.whiteTexture);
@@ -873,6 +972,7 @@ namespace DNDLLM.Map
             if (snap.backgroundImage != null)
                 CreateBigBackgroundSprite(snap.backgroundImage);
 
+            RebuildFog();
             AdjustCamera();
             OnMapReady?.Invoke();
             Debug.Log("[MapGenerator] Map restored from snapshot.");

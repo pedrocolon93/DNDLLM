@@ -281,7 +281,7 @@ namespace DnD.AI
 
         // ── Native function-call path ─────────────────────────────────────
 
-        [System.Serializable] private class MoveArgs        { public string target; public string direction; }
+        [System.Serializable] private class MoveArgs        { public string target; public string direction; public int x; public int y; public int dx; public int dy; }
         [System.Serializable] private class AmountArgs      { public string target; public int amount; }
         [System.Serializable] private class ConditionArgs   { public string target; public string condition; }
         [System.Serializable] private class SpawnEnemyArgs  { public string name; public int hp; public int ac; }
@@ -299,8 +299,8 @@ namespace DnD.AI
             _toolDefs = new List<LLMTool>
             {
                 new LLMTool("MOVE",
-                    "Move the player one tile in a cardinal direction.",
-                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"direction\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\"]}},\"required\":[\"target\",\"direction\"]}"),
+                    "Move the player. Provide EITHER direction (single tile step), OR dx/dy (relative offset, may be multi-tile), OR x/y (absolute destination, walks toward target tile-by-tile, stops at walls).",
+                    "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\",\"description\":\"'player' (current turn owner), 'player_N' (1-based party index), or a character name\"},\"direction\":{\"type\":\"string\",\"enum\":[\"north\",\"south\",\"east\",\"west\"]},\"dx\":{\"type\":\"integer\"},\"dy\":{\"type\":\"integer\"},\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"integer\"}},\"required\":[\"target\"]}"),
 
                 new LLMTool("DAMAGE",
                     "Deal damage to the player.",
@@ -370,12 +370,38 @@ namespace DnD.AI
                     case "MOVE":
                     {
                         var a = JsonUtility.FromJson<MoveArgs>(argsJson) ?? new MoveArgs();
-                        var (dx, dy) = DirToVector(a.direction ?? "");
-                        if (dx == 0 && dy == 0) return $"Unknown direction: {a.direction}";
                         var target = ResolveTarget(a.target, player);
                         var ctrl = MapCharacterController.For(target) ?? MapCharacterController.Instance;
-                        bool ok = ctrl?.TryMove(dx, dy) ?? false;
+                        if (ctrl == null) return "No map controller available.";
                         string who = target?.characterName ?? "Player";
+
+                        bool hasAbs = ArgHasField(argsJson, "x") && ArgHasField(argsJson, "y");
+                        bool hasRel = ArgHasField(argsJson, "dx") || ArgHasField(argsJson, "dy");
+
+                        if (hasAbs)
+                        {
+                            int startX = ctrl.GridX, startY = ctrl.GridY;
+                            int steps = ctrl.MoveTo(a.x, a.y, stepByStep: true);
+                            bool arrived = (ctrl.GridX == a.x && ctrl.GridY == a.y);
+                            if (arrived) return $"{who} moved to ({a.x},{a.y}).";
+                            if (steps == 0) return $"Move blocked: {who} cannot leave ({startX},{startY}) toward ({a.x},{a.y}).";
+                            return $"{who} moved {steps} tile(s) toward ({a.x},{a.y}); stopped at ({ctrl.GridX},{ctrl.GridY}).";
+                        }
+
+                        if (hasRel)
+                        {
+                            int tx = ctrl.GridX + a.dx;
+                            int ty = ctrl.GridY + a.dy;
+                            int steps = ctrl.MoveTo(tx, ty, stepByStep: true);
+                            bool arrived = (ctrl.GridX == tx && ctrl.GridY == ty);
+                            if (arrived) return $"{who} moved by ({a.dx},{a.dy}) to ({tx},{ty}).";
+                            if (steps == 0) return $"Move blocked: {who}'s path toward ({tx},{ty}) is impassable.";
+                            return $"{who} moved {steps} tile(s) toward ({tx},{ty}); stopped at ({ctrl.GridX},{ctrl.GridY}).";
+                        }
+
+                        var (ddx, ddy) = DirToVector(a.direction ?? "");
+                        if (ddx == 0 && ddy == 0) return $"Unknown direction: {a.direction}";
+                        bool ok = ctrl.TryMove(ddx, ddy);
                         return ok ? $"{who} moved {a.direction}." : $"Move blocked: {who}'s path to {a.direction} is impassable.";
                     }
 
@@ -517,6 +543,13 @@ namespace DnD.AI
                 Debug.LogWarning($"[GMToolExecutor] Tool '{toolName}' failed: {e.Message}");
                 return $"Tool '{toolName}' failed: {e.Message}";
             }
+        }
+
+        private static bool ArgHasField(string json, string field)
+        {
+            if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(field)) return false;
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                json, "\"" + System.Text.RegularExpressions.Regex.Escape(field) + "\"\\s*:");
         }
 
         private static (int dx, int dy) DirToVector(string dir)
