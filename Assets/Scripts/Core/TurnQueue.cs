@@ -1,57 +1,90 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DnD.Character;
+using DnD.Core;
 
 namespace DnD.Core
 {
     /// <summary>
-    /// Ordered list of who acts next. Drives both exploration and combat — exploration
-    /// rotates through party members one input at a time; combat extends the queue with
-    /// enemies in initiative order.
-    ///
-    /// The queue itself is provider-agnostic: it doesn't care whether the entry is a
-    /// human player or an AI-driven NPC. <see cref="IsPlayerTurn"/> tells the caller
-    /// whether the chat input should accept commands this round.
+    /// Single source of truth for "whose turn is it". Used by exploration
+    /// (party-only round-robin) and combat (initiative-sorted party+enemies).
     /// </summary>
     public class TurnQueue
     {
         public sealed class Entry
         {
             public CharacterStats Stats;
-            public bool           IsPlayer;     // false = enemy/NPC turn — input gated off
-            public string         DisplayName;  // cached so the HUD strip never dereferences a destroyed CharacterStats
+            public bool           IsPlayer;
+            public string         DisplayName;
+            public int            Initiative;
         }
 
         private readonly List<Entry> _order = new List<Entry>();
         private int _currentIndex;
+        private bool _isCombat;
 
-        /// <summary>Fired whenever the active turn changes (queue rebuilt or AdvanceTurn called).</summary>
         public event Action OnTurnChanged;
+        public event Action<CharacterStats> OnActorChanged;
 
         public IReadOnlyList<Entry> Order => _order;
         public int CurrentIndex => _currentIndex;
         public int Count => _order.Count;
+        public bool IsCombat => _isCombat;
 
         public Entry Current =>
             (_order.Count == 0 || _currentIndex < 0 || _currentIndex >= _order.Count) ? null : _order[_currentIndex];
 
-        public bool IsPlayerTurn => Current != null && Current.IsPlayer;
+        public CharacterStats CurrentActor => Current?.Stats;
+        public bool IsCurrentActorPlayer => Current != null && Current.IsPlayer;
+        public bool IsPlayerTurn => IsCurrentActorPlayer;
 
-        /// <summary>Replace the entire queue with a single rotation over the party (no enemies).</summary>
-        public void BeginExploration(IEnumerable<CharacterStats> players)
+        public void BeginExplorationRound(IEnumerable<CharacterStats> party)
         {
+            _isCombat = false;
             _order.Clear();
-            if (players != null)
-                foreach (var p in players)
-                    if (p != null) _order.Add(new Entry { Stats = p, IsPlayer = true, DisplayName = p.characterName });
+            if (party != null)
+                foreach (var p in party)
+                    if (p != null) _order.Add(new Entry { Stats = p, IsPlayer = true, DisplayName = p.characterName, Initiative = 0 });
             _currentIndex = 0;
-            OnTurnChanged?.Invoke();
+            FireChanged();
         }
 
-        /// <summary>Replace the queue with players + enemies for a combat encounter.
-        /// Caller is responsible for the desired order (e.g. by initiative roll).</summary>
+        public void BeginCombatRound(IEnumerable<CharacterStats> party, IEnumerable<CharacterStats> enemies)
+        {
+            _isCombat = true;
+            _order.Clear();
+            var partyList   = party   != null ? party.Where(p   => p   != null).ToList() : new List<CharacterStats>();
+            var enemyList   = enemies != null ? enemies.Where(e => e != null).ToList() : new List<CharacterStats>();
+
+            var rolled = new List<Entry>(partyList.Count + enemyList.Count);
+            foreach (var p in partyList)
+                rolled.Add(new Entry { Stats = p, IsPlayer = true,  DisplayName = p.characterName, Initiative = p.RollInitiative() });
+            foreach (var e in enemyList)
+                rolled.Add(new Entry { Stats = e, IsPlayer = false, DisplayName = e.characterName, Initiative = e.RollInitiative() });
+
+            // Highest initiative first; ties broken by Dex modifier desc.
+            rolled.Sort((a, b) =>
+            {
+                int cmp = b.Initiative.CompareTo(a.Initiative);
+                if (cmp != 0) return cmp;
+                int aDex = a.Stats != null ? a.Stats.abilities.GetModifier(AbilityScore.Dexterity) : 0;
+                int bDex = b.Stats != null ? b.Stats.abilities.GetModifier(AbilityScore.Dexterity) : 0;
+                return bDex.CompareTo(aDex);
+            });
+
+            _order.AddRange(rolled);
+            _currentIndex = 0;
+            FireChanged();
+        }
+
+        // Back-compat shim used by save/load and a few callers that prebuild order externally.
+        public void BeginExploration(IEnumerable<CharacterStats> players) => BeginExplorationRound(players);
+
+        // Back-compat shim: caller supplies an already-ordered combatant list.
         public void BeginCombat(IEnumerable<CharacterStats> orderedCombatants, Func<CharacterStats, bool> isPlayer)
         {
+            _isCombat = true;
             _order.Clear();
             if (orderedCombatants != null)
                 foreach (var c in orderedCombatants)
@@ -60,46 +93,48 @@ namespace DnD.Core
                         Stats       = c,
                         IsPlayer    = isPlayer != null && isPlayer(c),
                         DisplayName = c.characterName,
+                        Initiative  = c.initiative,
                     });
             _currentIndex = 0;
-            OnTurnChanged?.Invoke();
+            FireChanged();
         }
 
-        /// <summary>Advance to the next entry, wrapping around. Skips entries whose
-        /// CharacterStats has been destroyed (defeated and Destroy()'d).</summary>
+        public void EndTurn() => AdvanceTurn();
+
         public void AdvanceTurn()
         {
             if (_order.Count == 0) return;
             for (int i = 0; i < _order.Count; i++)
             {
                 _currentIndex = (_currentIndex + 1) % _order.Count;
-                if (_order[_currentIndex] != null && _order[_currentIndex].Stats != null)
-                {
-                    OnTurnChanged?.Invoke();
-                    return;
-                }
+                var e = _order[_currentIndex];
+                if (e != null && e.Stats != null) { FireChanged(); return; }
             }
-            // Whole queue is dead — clear and notify so listeners don't render stale state.
             _order.Clear();
             _currentIndex = 0;
-            OnTurnChanged?.Invoke();
+            FireChanged();
         }
 
-        /// <summary>Empty the queue. Used on state transitions (back to MainMenu, etc.).</summary>
         public void Clear()
         {
+            _isCombat = false;
             _order.Clear();
             _currentIndex = 0;
-            OnTurnChanged?.Invoke();
+            FireChanged();
         }
 
-        /// <summary>Remove entries whose CharacterStats has been destroyed. Useful after combat resolves.</summary>
         public void Compact()
         {
             int removed = _order.RemoveAll(e => e == null || e.Stats == null);
             if (removed == 0) return;
             if (_currentIndex >= _order.Count) _currentIndex = 0;
+            FireChanged();
+        }
+
+        private void FireChanged()
+        {
             OnTurnChanged?.Invoke();
+            OnActorChanged?.Invoke(CurrentActor);
         }
     }
 }

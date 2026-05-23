@@ -965,6 +965,10 @@ namespace DnD.Managers
                 ChatUI.Instance.AddSystemMessage("=== YOUR ADVENTURE BEGINS ===");
             _isResumingLoad = false;
 
+            // Single source of truth: rebuild the turn queue with the party in party-order.
+            if (playerCharacters != null && playerCharacters.Count > 0)
+                Turns.BeginExplorationRound(playerCharacters);
+
             // Reset world graph for this campaign
             string rootTheme = _campaignSeed.Length > 0 ? _campaignSeed.Split(',')[0].Trim() : "dungeon";
             _mapGraph.InitRoot(rootTheme);
@@ -1736,14 +1740,17 @@ namespace DnD.Managers
                 ChatUI.Instance.AddSystemMessage($"HP: {enemyData.hitPoints} | AC: {enemyData.armorClass}");
             }
 
-            // Start combat
-            if (CombatManager.Instance != null)
-            {
-                List<CharacterStats> players = new List<CharacterStats> { playerCharacter };
-                List<CharacterStats> enemies = new List<CharacterStats> { enemy };
-                CombatManager.Instance.StartCombat(players, enemies);
-                ChangeState(GameState.Combat);
-            }
+            EnterCombat(new List<CharacterStats> { enemy });
+        }
+
+        /// <summary>Hand off to CombatManager, which rolls initiative into TurnQueue via BeginCombatRound.</summary>
+        public void EnterCombat(List<CharacterStats> enemyList)
+        {
+            if (CombatManager.Instance == null) return;
+            var partyList = (playerCharacters != null && playerCharacters.Count > 0)
+                ? new List<CharacterStats>(playerCharacters)
+                : new List<CharacterStats> { playerCharacter };
+            CombatManager.Instance.StartCombat(partyList, enemyList);
         }
 
         private CharacterClass DetermineClass(string description)
