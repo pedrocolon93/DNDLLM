@@ -222,9 +222,12 @@ namespace DNDLLM.Map
                 grid[x, y] = new MapTile { x = x, y = y, type = type, walkable = walk, description = desc };
             }
 
-            // Phase 2 — holistic base map
+            // Phase 2 — holistic base map (or debug-sprite symbol map)
+            bool debugMode = LLMService.Instance.UseDebugSprites;
             if (DnD.UI.ChatUI.Instance != null)
-                DnD.UI.ChatUI.Instance.AddSystemMessage("[Strategy D] Painting holistic map (30-60s)...");
+                DnD.UI.ChatUI.Instance.AddSystemMessage(debugMode
+                    ? "[Strategy D] Painting symbol map..."
+                    : "[Strategy D] Painting holistic map (30-60s)...");
 
             Texture2D current = await LLMService.Instance.GenerateHolisticMapAsync(logical, strategyDGridMode);
             if (current == null)
@@ -235,24 +238,27 @@ namespace DNDLLM.Map
                 return;
             }
 
-            // Phase 3 — evaluate / refine loop
-            for (int round = 1; round <= refinementRounds; round++)
+            // Phase 3 — evaluate / refine loop (skipped in debug-sprite mode: all calls would be no-ops)
+            if (!debugMode)
             {
-                if (DnD.UI.ChatUI.Instance != null)
-                    DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Refinement round {round}/{refinementRounds}...");
-
-                string feedback = await LLMService.Instance.EvaluateMapImageAsync(current, logical);
-                if (string.IsNullOrEmpty(feedback)) break;
-
-                if (feedback.Trim().ToUpperInvariant().StartsWith("PERFECT"))
+                for (int round = 1; round <= refinementRounds; round++)
                 {
                     if (DnD.UI.ChatUI.Instance != null)
-                        DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Evaluator says PERFECT after {round - 1} round(s).");
-                    break;
-                }
+                        DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Refinement round {round}/{refinementRounds}...");
 
-                Texture2D refined = await LLMService.Instance.RefineMapImageAsync(current, feedback);
-                if (refined != null) current = refined;
+                    string feedback = await LLMService.Instance.EvaluateMapImageAsync(current, logical);
+                    if (string.IsNullOrEmpty(feedback)) break;
+
+                    if (feedback.Trim().ToUpperInvariant().StartsWith("PERFECT"))
+                    {
+                        if (DnD.UI.ChatUI.Instance != null)
+                            DnD.UI.ChatUI.Instance.AddSystemMessage($"[Strategy D] Evaluator says PERFECT after {round - 1} round(s).");
+                        break;
+                    }
+
+                    Texture2D refined = await LLMService.Instance.RefineMapImageAsync(current, feedback);
+                    if (refined != null) current = refined;
+                }
             }
 
             // Phase 4 — bake the grid overlay into the texture
