@@ -643,8 +643,11 @@ namespace DNDLLM.Map
         {
             if (fogTexture != null) return fogTexture;
             fogTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            // Dark indigo, not pure black — so undiscovered tiles read as "fog"
+            // visually, not as "outside the map" (which is the camera background).
+            // ARGB roughly #1A1428 (purple-tinged charcoal), full alpha.
             var px = new Color32[4];
-            for (int i = 0; i < 4; i++) px[i] = new Color32(0, 0, 0, 255);
+            for (int i = 0; i < 4; i++) px[i] = new Color32(0x1A, 0x14, 0x28, 255);
             fogTexture.SetPixels32(px);
             fogTexture.filterMode = FilterMode.Point;
             fogTexture.Apply();

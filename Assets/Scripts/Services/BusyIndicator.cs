@@ -88,9 +88,15 @@ namespace DNDLLM.Services
 
         private void Update()
         {
-            // Always spin while the panel has any visibility.
+            // Spinner ticks every frame the panel has visibility — including when
+            // _t == _target (fully shown). Keeping this outside the early-return
+            // below is the reason the spinner doesn't freeze after fade-in.
             if (_t > 0.001f || _target > 0.001f)
+            {
                 _spinAngle = (_spinAngle + 540f * Time.unscaledDeltaTime) % 360f;
+                if (_spinnerRect != null)
+                    _spinnerRect.localRotation = Quaternion.Euler(0f, 0f, -_spinAngle);
+            }
 
             if (Mathf.Approximately(_t, _target))
             {
@@ -111,8 +117,6 @@ namespace DNDLLM.Services
                 float s = Mathf.Lerp(0.85f, 1f, eased);
                 _panelRect.localScale = new Vector3(s, s, 1f);
             }
-            if (_spinnerRect != null)
-                _spinnerRect.localRotation = Quaternion.Euler(0f, 0f, -_spinAngle);
         }
 
         // ── UI construction ──────────────────────────────────────────────────

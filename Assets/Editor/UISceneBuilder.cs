@@ -256,14 +256,13 @@ public static class UISceneBuilder
             return btn;
         }
 
-        // rightOffset: -8 = MENU, -102 = EDIT MAP, -196 = CHARACTER
+        // rightOffset: -8 = MENU, -102 = CHARACTER (EDIT MAP is now inside the MENU panel).
         // Leading glyphs must be ones LiberationSans actually contains, otherwise TMP
         // logs "character not found" warnings and renders □. Safe picks: Math Operators
         // (U+2200-22FF) and General Punctuation (U+2000-206F). Avoid Dingbats (U+2700-27BF)
         // and most of Geometric Shapes (U+25A0-25FF) — not in LiberationSans.
         var menuBtn      = MakeHudButton("MenuButton",      "≡  MENU",      -8f);
-        var editMapBtn   = MakeHudButton("EditMapButton",   "•  EDIT MAP",  -102f);
-        var characterBtn = MakeHudButton("CharacterButton", "†  CHARACTER", -196f);
+        var characterBtn = MakeHudButton("CharacterButton", "†  CHARACTER", -102f);
 
         // ── Turn-order strip — top-center, anchored above the chat/map split ──
         // Single TMP_Text driven by GameManager via the TurnQueue.OnTurnChanged event.
@@ -291,7 +290,6 @@ public static class UISceneBuilder
             {
                 var gmSO = new SerializedObject(gm);
                 gmSO.FindProperty("menuButton").objectReferenceValue      = menuBtn;
-                gmSO.FindProperty("editMapButton").objectReferenceValue   = editMapBtn;
                 gmSO.FindProperty("characterButton").objectReferenceValue = characterBtn;
                 var turnStripProp = gmSO.FindProperty("turnStripText");
                 if (turnStripProp != null) turnStripProp.objectReferenceValue = turnStripTMP;
@@ -1944,6 +1942,10 @@ public static class UISceneBuilder
         var loadBtn = MenuMakeButton(panelGO.transform, "LOAD / MAIN MENU", UITheme.SystemText);
         loadBtn.onClick.AddListener(() => menuPanel.OnLoad?.Invoke());
 
+        // Edit Map button (moved here from the top-right HUD).
+        var editMapBtn = MenuMakeButton(panelGO.transform, "EDIT MAP", UITheme.SystemText);
+        editMapBtn.onClick.AddListener(() => { menuPanel.Close(); menuPanel.OnEditMap?.Invoke(); });
+
         MenuMakeDivider(panelGO.transform, UITheme.SystemText, 1);
 
         // Controls container — hosts the DM voice toggles built at runtime by
@@ -1971,6 +1973,7 @@ public static class UISceneBuilder
         menuSO.FindProperty("controlsContainer").objectReferenceValue = listGO;
         menuSO.FindProperty("saveButton").objectReferenceValue        = saveBtn;
         menuSO.FindProperty("loadButton").objectReferenceValue        = loadBtn;
+        menuSO.FindProperty("editMapButton").objectReferenceValue     = editMapBtn;
         menuSO.FindProperty("resumeButton").objectReferenceValue      = resumeBtn;
         menuSO.ApplyModifiedProperties();
 
