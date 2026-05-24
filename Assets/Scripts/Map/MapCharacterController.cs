@@ -88,6 +88,20 @@ namespace DNDLLM.Map
                 MapGenerator.Instance.RevealAround(startX, startY);
         }
 
+        // Defensive: if a regenerated map (sub-area, load, etc.) wraps fog around this
+        // token's current cell before Initialize/TryMove re-fire, reveal it from here.
+        // Cheap — a few array reads per frame; only triggers RebuildFog when the cell
+        // was actually still fogged.
+        private void LateUpdate()
+        {
+            var gen = MapGenerator.Instance;
+            if (gen == null || gen.discovered == null) return;
+            if (GridX < 0 || GridX >= gen.width)  return;
+            if (GridY < 0 || GridY >= gen.height) return;
+            if (!gen.discovered[GridX, GridY])
+                gen.RevealAround(GridX, GridY);
+        }
+
         /// <summary>
         /// Attempts to move by (dx, dy) grid steps.
         /// Returns false if the destination is out of bounds or not walkable.
