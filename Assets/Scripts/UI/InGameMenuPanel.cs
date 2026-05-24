@@ -15,6 +15,7 @@ namespace DnD.UI
         // Events wired by GameManager
         public System.Action OnSave;
         public System.Action OnLoad;
+        public System.Action OnEditMap;
         public System.Action<bool> OnTTSEnabledChanged;
         public System.Action<bool> OnTTSAutoPlayChanged;
 
@@ -22,6 +23,7 @@ namespace DnD.UI
         [SerializeField] private GameObject controlsContainer;
         [SerializeField] private Button     saveButton;
         [SerializeField] private Button     loadButton;
+        [SerializeField] private Button     editMapButton;
         [SerializeField] private Button     resumeButton;
 
         private GameObject _ttsEnabledRow, _ttsAutoPlayRow;
@@ -46,6 +48,11 @@ namespace DnD.UI
             {
                 loadButton.onClick.RemoveAllListeners();
                 loadButton.onClick.AddListener(() => OnLoad?.Invoke());
+            }
+            if (editMapButton != null)
+            {
+                editMapButton.onClick.RemoveAllListeners();
+                editMapButton.onClick.AddListener(() => { Close(); OnEditMap?.Invoke(); });
             }
             if (resumeButton != null)
             {

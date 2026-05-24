@@ -62,7 +62,6 @@ namespace DnD.Managers
         [SerializeField] private DnD.UI.CharacterCreationPopup  characterPopup;
         [SerializeField] private UnityEngine.UI.Button          menuButton;
         [SerializeField] private DnD.UI.InGameMenuPanel         inGameMenuPanel;
-        [SerializeField] private UnityEngine.UI.Button          editMapButton;
         [SerializeField] private DnD.UI.EditMapPanel            editMapPanel;
         [SerializeField] private UnityEngine.UI.Button          characterButton;
         [SerializeField] private DnD.UI.CharacterScreenPanel    characterScreenPanel;
@@ -166,6 +165,7 @@ namespace DnD.Managers
                 {
                     inGameMenuPanel.OnSave            = OnSaveFromMenu;
                     inGameMenuPanel.OnLoad            = OnLoadFromMenu;
+                    inGameMenuPanel.OnEditMap         = OnEditMapButtonPressed;
                     inGameMenuPanel.OnTTSEnabledChanged = v =>
                     {
                         if (DNDLLM.Services.TTSService.Instance != null)
@@ -178,9 +178,6 @@ namespace DnD.Managers
                         SaveCurrentSlot();  // persist immediately
                     };
                 }
-
-                if (editMapButton != null)
-                    editMapButton.onClick.AddListener(OnEditMapButtonPressed);
 
                 if (editMapPanel != null)
                     editMapPanel.OnSaveRequested = () => { SaveCurrentSlot(); ChatUI.Instance?.AddSystemMessage("Map changes saved."); };
@@ -255,7 +252,10 @@ namespace DnD.Managers
                 if (e == null) continue;
                 if (i > 0) sb.Append("  →  ");
                 bool active = (i == Turns.CurrentIndex);
-                if (active)        sb.Append("<b><color=#C8A050>▶ ").Append(e.DisplayName).Append("</color></b>");
+                // Leading glyph must be one LiberationSans actually contains. ▶ (U+25B6,
+                // Geometric Shapes) renders as the missing-glyph "□" box. › (U+203A,
+                // General Punctuation) is safe and used elsewhere in this codebase.
+                if (active)        sb.Append("<b><color=#C8A050>› ").Append(e.DisplayName).Append("</color></b>");
                 else if (e.IsPlayer) sb.Append("<color=#A08060>").Append(e.DisplayName).Append("</color>");
                 else                 sb.Append("<color=#7A5A40>").Append(e.DisplayName).Append("</color>");
             }
