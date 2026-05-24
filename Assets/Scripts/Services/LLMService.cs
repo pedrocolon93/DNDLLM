@@ -28,8 +28,8 @@ namespace DNDLLM.Services
         public string ApiKey => apiKey;
         [Tooltip("Text-only model used when Use Debug Sprites is ON (no map images to attach). DeepSeek V4 Flash is a good fast default.")]
         [SerializeField] private string model = "deepseek/deepseek-v4-flash";
-        [Tooltip("Multimodal model used when Use Debug Sprites is OFF — the DM attaches the painted battlemap as an image, so this needs vision support. Default qwen/qwen3.6-27b. Other options: qwen/qwen3.5-plus, google/gemini-2.0-flash-001, openai/gpt-4o-mini.")]
-        [SerializeField] private string multimodalModel = "qwen/qwen3.6-27b";
+        [Tooltip("Multimodal model used when Use Debug Sprites is OFF — the DM attaches the painted battlemap as an image, so this needs vision support. Default qwen/qwen3.6-plus. Other options: qwen/qwen3.5-plus, google/gemini-2.0-flash-001, openai/gpt-4o-mini.")]
+        [SerializeField] private string multimodalModel = "qwen/qwen3.6-plus";
         // Active text model: switches automatically based on useDebugSprites so the DM
         // doesn't ship images to a text-only endpoint (OpenRouter 404s instead of
         // silently ignoring). All callers in this class route through ActiveTextModel.
