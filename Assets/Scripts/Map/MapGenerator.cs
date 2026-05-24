@@ -689,7 +689,8 @@ namespace DNDLLM.Map
                             var tex = GetFogTexture();
                             float ppu = tex.width / cellSize;
                             sr.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), ppu);
-                            sr.color = Color.black;
+                            // White tint = pass through the indigo texture color unmodified.
+                            sr.color = Color.white;
                             fogObjs[x, y] = fog;
                         }
                     }
