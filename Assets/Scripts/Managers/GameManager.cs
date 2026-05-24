@@ -202,13 +202,6 @@ namespace DnD.Managers
             }
         }
 
-        private void OnGUI()
-        {
-            GUI.color = Color.yellow;
-            GUI.Label(new Rect(10, 10, 600, 40), $"[GM] {_initStatus} | state={currentState} | ChatUI={(ChatUI.Instance != null ? "OK" : "NULL")}");
-            GUI.color = Color.white;
-        }
-
         private void Update()
         {
             if (!Input.GetKeyDown(KeyCode.Escape)) return;

@@ -35,18 +35,6 @@ namespace DnD.UI
             else Destroy(gameObject);
         }
 
-        private void OnGUI()
-        {
-            GUI.color = Color.cyan;
-            string info = $"[ChatUI] msgs={activeMessages.Count}";
-            if (contentPanel != null)
-                info += $" panelH={contentPanel.rect.height:F0} panelW={contentPanel.rect.width:F0}";
-            else
-                info += " contentPanel=NULL";
-            GUI.Label(new Rect(10, 50, 700, 30), info);
-            GUI.color = Color.white;
-        }
-
         private void Start()
         {
             if (sendButton != null)
