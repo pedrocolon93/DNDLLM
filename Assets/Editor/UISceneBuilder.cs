@@ -67,6 +67,7 @@ public static class UISceneBuilder
         mapVLG.childForceExpandHeight = false;
         mapVLG.childControlWidth = true;
         mapVLG.childControlHeight = true;
+        mapVLG.childAlignment = TextAnchor.MiddleCenter;
 
         AddHeader(mapPanel.transform, "THE MAP");
 
@@ -75,6 +76,11 @@ public static class UISceneBuilder
         var mapDisplayLE = mapDisplayGO.AddComponent<LayoutElement>();
         mapDisplayLE.flexibleHeight = 1;
         mapDisplayLE.flexibleWidth = 1;
+        // Lock to the square RenderTexture aspect (1024x1024) so the map doesn't
+        // stretch/letterbox unpredictably as the pane resizes.
+        var mapAspect = mapDisplayGO.AddComponent<AspectRatioFitter>();
+        mapAspect.aspectMode  = AspectRatioFitter.AspectMode.FitInParent;
+        mapAspect.aspectRatio = 1f;
 
         // ── Chat panel (40%) ──────────────────────────────────────────
         var chatPanel = MakePanel("ChatPanel", split.transform, UITheme.BackgroundDeep);
