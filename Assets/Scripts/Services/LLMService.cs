@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -7,19 +8,20 @@ using DnD.AI;
 
 namespace DNDLLM.Services
 {
-    public enum LLMProvider { OpenRouter, Ollama, Local }
+    public enum LLMProvider { OpenRouter, LMStudio }
 
     public class LLMService : MonoBehaviour
     {
         public static LLMService Instance { get; private set; }
 
         [Header("Provider")]
-        [SerializeField] private LLMProvider provider = LLMProvider.Local;
+        [SerializeField] private LLMProvider provider = LLMProvider.OpenRouter;
         [SerializeField] private bool useMock = false;
 
         [Header("Debug sprites (skip remote image generation)")]
         [Tooltip("When ON: every image-generation call returns a procedural colored shape via DebugSpriteFactory. Default ON for fast iteration.")]
         public bool useDebugSprites = true;
+        public bool UseDebugSprites => useDebugSprites;
 
         [Header("OpenRouter")]
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
@@ -27,14 +29,14 @@ namespace DNDLLM.Services
         [SerializeField] private string model = "deepseek/deepseek-v4-flash";
         [SerializeField] private string imageModel = "openai/dall-e-3";
 
-        [Header("Ollama  (text only — images still use OpenRouter)")]
-        [SerializeField] private string ollamaBaseUrl = "http://localhost:11434";
-        [SerializeField] private string ollamaModel = "llama3.2";
-
-        [Header("Local OpenAI-compatible (e.g. osaurus on 127.0.0.1:1337)")]
-        [SerializeField] private string localBaseUrl = "http://127.0.0.1:1337";
-        [SerializeField] private string localApiKey  = "";
-        [SerializeField] private string localModel   = "qwen3.6-35b-a3b-mxfp4";
+        [Header("LM Studio (text only — OpenAI-compatible local API; images still use OpenRouter)")]
+        [FormerlySerializedAs("localBaseUrl")]
+        [SerializeField] private string lmStudioBaseUrl = "http://localhost:1234";
+        [FormerlySerializedAs("localApiKey")]
+        [SerializeField] private string lmStudioApiKey  = "";
+        [FormerlySerializedAs("localModel")]
+        [SerializeField] private string lmStudioModel   = "";
+        public string LMStudioBaseUrl => lmStudioBaseUrl;
 
         [Header("Cache")]
         [SerializeField] private bool useCache = true;
@@ -57,8 +59,8 @@ namespace DNDLLM.Services
             var s = SecretsLoader.Load();
             if (s != null)
             {
-                apiKey      = SecretsLoader.Resolve(apiKey,      s.openRouterApiKey);
-                localApiKey = SecretsLoader.Resolve(localApiKey, s.localApiKey);
+                apiKey         = SecretsLoader.Resolve(apiKey,         s.openRouterApiKey);
+                lmStudioApiKey = SecretsLoader.Resolve(lmStudioApiKey, s.localApiKey);
             }
         }
 
@@ -140,16 +142,11 @@ namespace DNDLLM.Services
                 new Message { role = "user",   content = userPrompt }
             };
 
-            if (provider == LLMProvider.Ollama)
+            if (provider == LLMProvider.LMStudio)
             {
-                string url = $"{ollamaBaseUrl.TrimEnd('/')}/v1/chat/completions";
-                return await SendChatCompletionAsync(url, ollamaModel, messages, authToken: null);
-            }
-            else if (provider == LLMProvider.Local)
-            {
-                string url = $"{localBaseUrl.TrimEnd('/')}/v1/chat/completions";
-                return await SendChatCompletionAsync(url, localModel, messages,
-                    authToken: string.IsNullOrEmpty(localApiKey) ? null : localApiKey);
+                string url = $"{lmStudioBaseUrl.TrimEnd('/')}/v1/chat/completions";
+                return await SendChatCompletionAsync(url, lmStudioModel, messages,
+                    authToken: string.IsNullOrEmpty(lmStudioApiKey) ? null : lmStudioApiKey);
             }
             else
             {
@@ -159,7 +156,7 @@ namespace DNDLLM.Services
             }
         }
 
-        // Shared chat-completion helper — used by both OpenRouter and Ollama paths
+        // Shared chat-completion helper — used by both OpenRouter and LM Studio paths
         private async Task<string> SendChatCompletionAsync(
             string url, string modelName, List<Message> messages, string authToken)
         {
@@ -473,17 +470,11 @@ namespace DNDLLM.Services
             CancellationToken ct = default)
         {
             string url, modelName, authToken;
-            if (provider == LLMProvider.Ollama)
+            if (provider == LLMProvider.LMStudio)
             {
-                url = $"{ollamaBaseUrl.TrimEnd('/')}/v1/chat/completions";
-                modelName = ollamaModel;
-                authToken = null;
-            }
-            else if (provider == LLMProvider.Local)
-            {
-                url = $"{localBaseUrl.TrimEnd('/')}/v1/chat/completions";
-                modelName = localModel;
-                authToken = string.IsNullOrEmpty(localApiKey) ? null : localApiKey;
+                url = $"{lmStudioBaseUrl.TrimEnd('/')}/v1/chat/completions";
+                modelName = lmStudioModel;
+                authToken = string.IsNullOrEmpty(lmStudioApiKey) ? null : lmStudioApiKey;
             }
             else
             {
