@@ -27,6 +27,9 @@ namespace DNDLLM.Services
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
         public string ApiKey => apiKey;
         [SerializeField] private string model = "deepseek/deepseek-v4-flash";
+        [Tooltip("ON: the text model is multimodal (Gemini, GPT-4o, Qwen-VL, ...) and can accept image attachments. OFF (default): text-only model like DeepSeek; image attachments are dropped before the request.")]
+        [SerializeField] private bool textModelIsMultimodal = false;
+        public bool TextModelIsMultimodal => textModelIsMultimodal;
         [SerializeField] private string imageModel = "openai/dall-e-3";
 
         [Header("LM Studio (text only — OpenAI-compatible local API; images still use OpenRouter)")]

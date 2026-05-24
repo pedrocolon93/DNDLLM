@@ -19,6 +19,7 @@ namespace DNDLLM.EditorTools
         private SerializedProperty useDebugSpritesProp;
         private SerializedProperty apiKeyProp;
         private SerializedProperty modelProp;
+        private SerializedProperty textModelIsMultimodalProp;
         private SerializedProperty imageModelProp;
         private SerializedProperty lmStudioBaseUrlProp;
         private SerializedProperty lmStudioApiKeyProp;
@@ -33,6 +34,7 @@ namespace DNDLLM.EditorTools
             useDebugSpritesProp = serializedObject.FindProperty("useDebugSprites");
             apiKeyProp          = serializedObject.FindProperty("apiKey");
             modelProp           = serializedObject.FindProperty("model");
+            textModelIsMultimodalProp = serializedObject.FindProperty("textModelIsMultimodal");
             imageModelProp      = serializedObject.FindProperty("imageModel");
             lmStudioBaseUrlProp = serializedObject.FindProperty("lmStudioBaseUrl");
             lmStudioApiKeyProp  = serializedObject.FindProperty("lmStudioApiKey");
@@ -58,7 +60,10 @@ namespace DNDLLM.EditorTools
             EditorGUILayout.PropertyField(imageModelProp, new GUIContent("Image Model"));
             EditorGUILayout.PropertyField(evalModelProp, new GUIContent("Vision Eval Model"));
             if (provider == LLMProvider.OpenRouter)
+            {
                 EditorGUILayout.PropertyField(modelProp, new GUIContent("Text Model"));
+                EditorGUILayout.PropertyField(textModelIsMultimodalProp, new GUIContent("Text Model Is Multimodal"));
+            }
 
             if (provider == LLMProvider.LMStudio)
             {

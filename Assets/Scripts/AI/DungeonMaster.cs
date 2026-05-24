@@ -441,8 +441,11 @@ DESC: [description]";
 
             // Attach the painted battlemap to the player turn so multimodal models (Qwen, Gemini,
             // GPT-4o, …) can see what the player is looking at. StyleAnchor holds the final
-            // grid-overlaid map texture; on text-only models the image is ignored harmlessly.
-            string mapDataUrl = TryEncodeMapDataUrl();
+            // grid-overlaid map texture. Text-only models like DeepSeek don't just ignore the
+            // image — OpenRouter rejects the request with HTTP 404 "No endpoints found that
+            // support image input" — so gate the attachment on LLMService.TextModelIsMultimodal.
+            bool canAttachImage = svc.TextModelIsMultimodal;
+            string mapDataUrl = canAttachImage ? TryEncodeMapDataUrl() : null;
             msgs.Add(string.IsNullOrEmpty(mapDataUrl)
                 ? LLMChatMessage.User(userBlock)
                 : LLMChatMessage.UserWithImage(userBlock, mapDataUrl));
