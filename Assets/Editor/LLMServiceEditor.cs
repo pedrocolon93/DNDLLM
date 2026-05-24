@@ -19,7 +19,7 @@ namespace DNDLLM.EditorTools
         private SerializedProperty useDebugSpritesProp;
         private SerializedProperty apiKeyProp;
         private SerializedProperty modelProp;
-        private SerializedProperty textModelIsMultimodalProp;
+        private SerializedProperty multimodalModelProp;
         private SerializedProperty imageModelProp;
         private SerializedProperty lmStudioBaseUrlProp;
         private SerializedProperty lmStudioApiKeyProp;
@@ -34,7 +34,7 @@ namespace DNDLLM.EditorTools
             useDebugSpritesProp = serializedObject.FindProperty("useDebugSprites");
             apiKeyProp          = serializedObject.FindProperty("apiKey");
             modelProp           = serializedObject.FindProperty("model");
-            textModelIsMultimodalProp = serializedObject.FindProperty("textModelIsMultimodal");
+            multimodalModelProp = serializedObject.FindProperty("multimodalModel");
             imageModelProp      = serializedObject.FindProperty("imageModel");
             lmStudioBaseUrlProp = serializedObject.FindProperty("lmStudioBaseUrl");
             lmStudioApiKeyProp  = serializedObject.FindProperty("lmStudioApiKey");
@@ -61,8 +61,14 @@ namespace DNDLLM.EditorTools
             EditorGUILayout.PropertyField(evalModelProp, new GUIContent("Vision Eval Model"));
             if (provider == LLMProvider.OpenRouter)
             {
-                EditorGUILayout.PropertyField(modelProp, new GUIContent("Text Model"));
-                EditorGUILayout.PropertyField(textModelIsMultimodalProp, new GUIContent("Text Model Is Multimodal"));
+                bool debug = useDebugSpritesProp.boolValue;
+                EditorGUILayout.PropertyField(modelProp,           new GUIContent("Text Model (debug)",     "Used when Use Debug Sprites is ON — no images attached, can be text-only."));
+                EditorGUILayout.PropertyField(multimodalModelProp, new GUIContent("Multimodal Model (live)", "Used when Use Debug Sprites is OFF — DM attaches the painted battlemap, so this needs vision support."));
+                EditorGUILayout.HelpBox(
+                    debug
+                        ? $"Active: {modelProp.stringValue}  (debug sprites → text-only)"
+                        : $"Active: {multimodalModelProp.stringValue}  (live images → multimodal)",
+                    MessageType.None);
             }
 
             if (provider == LLMProvider.LMStudio)

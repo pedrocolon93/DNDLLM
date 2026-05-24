@@ -26,10 +26,15 @@ namespace DNDLLM.Services
         [Header("OpenRouter")]
         [SerializeField] private string apiKey = "sk-or-v1-YOUR_KEY_HERE";
         public string ApiKey => apiKey;
+        [Tooltip("Text-only model used when Use Debug Sprites is ON (no map images to attach). DeepSeek V4 Flash is a good fast default.")]
         [SerializeField] private string model = "deepseek/deepseek-v4-flash";
-        [Tooltip("ON: the text model is multimodal (Gemini, GPT-4o, Qwen-VL, ...) and can accept image attachments. OFF (default): text-only model like DeepSeek; image attachments are dropped before the request.")]
-        [SerializeField] private bool textModelIsMultimodal = false;
-        public bool TextModelIsMultimodal => textModelIsMultimodal;
+        [Tooltip("Multimodal model used when Use Debug Sprites is OFF — the DM attaches the painted battlemap as an image, so this needs vision support. Default qwen/qwen3.6-27b. Other options: qwen/qwen3.5-plus, google/gemini-2.0-flash-001, openai/gpt-4o-mini.")]
+        [SerializeField] private string multimodalModel = "qwen/qwen3.6-27b";
+        // Active text model: switches automatically based on useDebugSprites so the DM
+        // doesn't ship images to a text-only endpoint (OpenRouter 404s instead of
+        // silently ignoring). All callers in this class route through ActiveTextModel.
+        public string ActiveTextModel => useDebugSprites ? model : multimodalModel;
+        public bool TextModelIsMultimodal => !useDebugSprites;
         [SerializeField] private string imageModel = "openai/dall-e-3";
 
         [Header("LM Studio (text only — OpenAI-compatible local API; images still use OpenRouter)")]
@@ -155,7 +160,7 @@ namespace DNDLLM.Services
             {
                 return await SendChatCompletionAsync(
                     "https://openrouter.ai/api/v1/chat/completions",
-                    model, messages, authToken: apiKey);
+                    ActiveTextModel, messages, authToken: apiKey);
             }
         }
 
@@ -482,7 +487,7 @@ namespace DNDLLM.Services
             else
             {
                 url = "https://openrouter.ai/api/v1/chat/completions";
-                modelName = model;
+                modelName = ActiveTextModel;
                 authToken = apiKey;
             }
 
